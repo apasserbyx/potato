@@ -56,7 +56,7 @@ object HabitNotifications {
             NotificationManagerCompat.from(context)
                 .notify(ID_SUMMARY_BASE + slot.ordinal, builder.build())
         }
-        if (settings.habitAppSoundFallback && level != HabitAlertLevel.GENTLE) {
+        if (settings.habitUseAppSound && level != HabitAlertLevel.GENTLE) {
             HabitSounds.playReminder(context, settings.habitSoundKey)
         }
     }
@@ -106,7 +106,7 @@ object HabitNotifications {
             NotificationManagerCompat.from(context)
                 .notify(notificationId(habit.id), builder.build())
         }
-        if (settings.habitAppSoundFallback && level != HabitAlertLevel.GENTLE) {
+        if (settings.habitUseAppSound && level != HabitAlertLevel.GENTLE) {
             HabitSounds.playReminder(
                 context,
                 habit.soundKey.ifBlank { settings.habitSoundKey }
@@ -121,15 +121,22 @@ object HabitNotifications {
         }.getOrDefault(HabitAlertLevel.STANDARD)
         val soundKey = soundKeyOverride ?: settings.habitSoundKey
         val channel = HabitNotificationChannels.ensureChannel(context, soundKey, level)
+        val useAppSound = settings.habitUseAppSound
         val builder = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_stat_timer)
             .setContentTitle("Potato 习惯提醒测试")
-            .setContentText("当前提示音：${HabitSounds.label(soundKey)}")
+            .setContentText(
+                "当前方式：${if (useAppSound) "App 直接播放" else "系统通知声音"} · " +
+                    HabitSounds.label(soundKey)
+            )
             .setContentIntent(openHabits(context))
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
         runCatching {
             NotificationManagerCompat.from(context).notify(ID_TEST, builder.build())
+        }
+        if (useAppSound && level != HabitAlertLevel.GENTLE) {
+            HabitSounds.playReminder(context, soundKey)
         }
     }
 

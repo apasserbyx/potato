@@ -128,7 +128,7 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
     var showHabitSoundPicker by remember { mutableStateOf(false) }
     var channelStatusVersion by remember { mutableIntStateOf(0) }
     var soundImportMessage by remember { mutableStateOf("") }
-    var appSoundFallback by remember { mutableStateOf(settings.habitAppSoundFallback) }
+    var useAppSound by remember { mutableStateOf(settings.habitUseAppSound) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -702,7 +702,9 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
                             !habitChannelStatus.appNotificationsEnabled ->
                                 "通知权限未开启，习惯提醒不会出现"
                             !habitChannelStatus.channelEnabled ->
-                                "当前声音/强度的通知渠道被系统关闭"
+                                "当前通知渠道被系统关闭"
+                            habitChannelStatus.appSoundMode ->
+                                "App 直接播放已开启，不依赖系统通知声音"
                             !habitChannelStatus.soundEnabled ->
                                 "通知渠道声音被系统关闭，可尝试修复"
                             else -> "当前设置可以正常提醒"
@@ -710,6 +712,7 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
                         trailing = when {
                             !habitChannelStatus.appNotificationsEnabled -> "去开启"
                             !habitChannelStatus.channelEnabled -> "去设置"
+                            habitChannelStatus.appSoundMode -> "测试"
                             !habitChannelStatus.soundEnabled -> "修复声音"
                             else -> "测试"
                         },
@@ -719,6 +722,8 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
                                     enableNotifications()
                                 !habitChannelStatus.channelEnabled ->
                                     openHabitChannelSettings(habitChannelStatus.channelId)
+                                habitChannelStatus.appSoundMode ->
+                                    sendHabitTestReminder()
                                 !habitChannelStatus.soundEnabled -> {
                                     HabitNotificationChannels.repairChannel(context)
                                     channelStatusVersion++
@@ -832,22 +837,22 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                "App 补充播放",
+                                "使用 App 直接播放提醒音",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = palette.ink
                             )
                             Spacer(Modifier.height(3.dp))
                             Text(
-                                "OPPO / 一加等机型通知无声时，由 App 直接补播。会尊重静音、媒体音量和免打扰。",
+                                "不依赖系统通知渠道，避免 OPPO / 一加等机型拦截声音。会尊重静音、媒体音量和免打扰。",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = palette.muted
                             )
                         }
                         Switch(
-                            checked = appSoundFallback,
+                            checked = useAppSound,
                             onCheckedChange = {
-                                appSoundFallback = it
-                                settings.habitAppSoundFallback = it
+                                useAppSound = it
+                                settings.habitUseAppSound = it
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
@@ -869,8 +874,8 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
                     )
                     DividerLine()
                     SettingRow(
-                        title = "内置通知声音测试",
-                        subtitle = "通过通知渠道播放「土豆叮」，排查自定义铃声问题",
+                        title = "当前提醒方式测试",
+                        subtitle = "按当前方式播放一次「土豆叮」，验证实际提醒效果",
                         trailing = "播放",
                         onClick = { HabitNotifications.postTest(context, "chime") }
                     )

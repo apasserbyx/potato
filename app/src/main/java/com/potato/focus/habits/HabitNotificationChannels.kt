@@ -14,7 +14,8 @@ data class HabitChannelStatus(
     val appNotificationsEnabled: Boolean,
     val channelEnabled: Boolean,
     val soundEnabled: Boolean,
-    val channelId: String
+    val channelId: String,
+    val appSoundMode: Boolean
 )
 
 object HabitNotificationChannels {
@@ -25,8 +26,10 @@ object HabitNotificationChannels {
         level: HabitAlertLevel
     ): String {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return "habit_reminder"
-        val generation = SettingsStore(context).habitChannelGeneration
-        val id = channelId(soundKey, level, generation)
+        val settings = SettingsStore(context)
+        val useAppSound = settings.habitUseAppSound
+        val generation = settings.habitChannelGeneration
+        val id = channelId(soundKey, level, generation, useAppSound)
         val manager = context.getSystemService(NotificationManager::class.java)
         if (manager.getNotificationChannel(id) != null) return id
 
@@ -40,9 +43,10 @@ object HabitNotificationChannels {
             HabitAlertLevel.STANDARD -> "标准"
             HabitAlertLevel.STRONG -> "醒目"
         }
+        val soundLabel = if (useAppSound) "App 播放" else HabitSounds.label(soundKey)
         val channel = NotificationChannel(
             id,
-            "习惯提醒 · $levelLabel · ${HabitSounds.label(soundKey)}",
+            "习惯提醒 · $levelLabel · $soundLabel",
             importance
         ).apply {
             description = "Potato 习惯提醒，每个时段每天最多一次"
@@ -50,6 +54,12 @@ object HabitNotificationChannels {
             if (level == HabitAlertLevel.GENTLE) {
                 setSound(null, null)
                 enableVibration(false)
+            } else if (useAppSound) {
+                // The notification itself is silent; the app plays the sound at
+                // reminder time. This avoids OEMs intercepting channel sounds.
+                setSound(null, null)
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 180, 100, 180)
             } else {
                 val uri = HabitSounds.resolveUri(context, soundKey)
                     ?: HabitSounds.fallbackUri(context)
@@ -99,33 +109,54 @@ object HabitNotificationChannels {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.notificationChannels
             .filter {
-                it.id == "habit_reminder" || it.id.startsWith("habit_reminder_v2_")
+                it.id == "habit_reminder" ||
+                    it.id.startsWith("habit_reminder_v2_") ||
+                    it.id.startsWith("habit_reminder_v3_")
             }
             .forEach { manager.deleteNotificationChannel(it.id) }
     }
 
     fun status(context: Context): HabitChannelStatus {
+        val settings = SettingsStore(context)
         val (sound, level) = globalSettings(context)
         val id = channelId(
             sound,
             level,
-            SettingsStore(context).habitChannelGeneration
+            settings.habitChannelGeneration,
+            settings.habitUseAppSound
         )
         val appEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            return HabitChannelStatus(appEnabled, true, true, id)
+            return HabitChannelStatus(
+                appEnabled,
+                true,
+                true,
+                id,
+                settings.habitUseAppSound
+            )
         }
         val manager = context.getSystemService(NotificationManager::class.java)
         val channel = manager.getNotificationChannel(id)
         val channelEnabled = channel == null || channel.importance != NotificationManager.IMPORTANCE_NONE
-        val soundEnabled = level == HabitAlertLevel.GENTLE || channel == null || channel.sound != null
-        return HabitChannelStatus(appEnabled, channelEnabled, soundEnabled, id)
+        val soundEnabled = settings.habitUseAppSound ||
+            level == HabitAlertLevel.GENTLE ||
+            channel == null ||
+            channel.sound != null
+        return HabitChannelStatus(
+            appEnabled,
+            channelEnabled,
+            soundEnabled,
+            id,
+            settings.habitUseAppSound
+        )
     }
 
     private fun channelId(
         soundKey: String,
         level: HabitAlertLevel,
-        generation: Int
+        generation: Int,
+        useAppSound: Boolean
     ): String =
-        "habit_reminder_v3_${HabitSounds.channelPart(soundKey)}_${level.name.lowercase()}_g$generation"
+        "habit_reminder_v4_${if (useAppSound) "app" else "sys"}_" +
+            "${HabitSounds.channelPart(soundKey)}_${level.name.lowercase()}_g$generation"
 }
