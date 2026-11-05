@@ -31,6 +31,7 @@ object HabitSounds {
         if (key.isBlank()) return "跟随全局"
         builtInOptions.firstOrNull { it.key == key }?.let { return it.label }
         if (key.startsWith("system:")) return "系统铃声"
+        if (key.startsWith("media:")) return "自定义音频"
         return "系统默认"
     }
 
@@ -42,9 +43,14 @@ object HabitSounds {
             key.startsWith("system:") -> {
                 return runCatching { Uri.parse(key.removePrefix("system:")) }.getOrNull()
             }
+            key.startsWith("media:") -> {
+                return runCatching { Uri.parse(key.removePrefix("media:")) }.getOrNull()
+            }
             else -> {
-                val option = builtInOptions.firstOrNull { it.key == key } ?: return Settings.System.DEFAULT_NOTIFICATION_URI
-                val res = option.rawRes ?: return Settings.System.DEFAULT_NOTIFICATION_URI
+                val option = builtInOptions.firstOrNull { it.key == key }
+                    ?: return Settings.System.DEFAULT_NOTIFICATION_URI ?: fallbackUri(context)
+                val res = option.rawRes
+                    ?: return Settings.System.DEFAULT_NOTIFICATION_URI ?: fallbackUri(context)
                 return Uri.parse("android.resource://${context.packageName}/$res")
             }
         }
@@ -56,6 +62,7 @@ object HabitSounds {
     fun channelPart(key: String): String = when {
         key.isBlank() -> "global"
         key.startsWith("system:") -> "sys_${abs(key.hashCode())}"
+        key.startsWith("media:") -> "media_${abs(key.hashCode())}"
         else -> key.replace(Regex("[^a-zA-Z0-9_-]"), "_")
     }
 
@@ -72,6 +79,15 @@ object HabitSounds {
             return
         }
         val uri = resolveUri(context, key) ?: return
+        if (key.startsWith("media:")) {
+            runCatching {
+                currentPlayer = MediaPlayer.create(context, uri)?.apply {
+                    setOnCompletionListener { stopPreview() }
+                    start()
+                }
+            }
+            return
+        }
         runCatching {
             currentRingtone = RingtoneManager.getRingtone(context, uri)?.apply {
                 play()

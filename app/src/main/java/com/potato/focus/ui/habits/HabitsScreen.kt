@@ -822,6 +822,27 @@ private fun HabitEditorSheet(
         }
     }
 
+    val imagePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        imagePicker.launch("image/*")
+    }
+
+    fun openImagePicker() {
+        val permissions = when {
+            Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+            else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+        val missing = permissions.filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) {
+            imagePicker.launch("image/*")
+        } else {
+            imagePermissionLauncher.launch(missing.toTypedArray())
+        }
+    }
+
     fun pickReminderTime() {
         TimePickerDialog(
             context,
@@ -1143,7 +1164,7 @@ private fun HabitEditorSheet(
                     tint = habitColor(colorHex)
                 )
                 Spacer(Modifier.width(10.dp))
-                TextButton(onClick = { imagePicker.launch("image/*") }) {
+                TextButton(onClick = { openImagePicker() }) {
                     Text("从相册选择")
                 }
                 if (iconImagePath.isNotBlank()) {

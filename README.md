@@ -39,6 +39,7 @@
   - 系统默认提示音
   - 系统铃声选择器
   - 支持试听和测试提醒
+- 支持导入本地音频作为提示音（会请求媒体读取权限）
 - 自定义习惯图标：
   - 12 个内置矢量图标
   - Emoji
@@ -162,8 +163,13 @@ app/src/main/java/com/potato/focus/
 - `SCHEDULE_EXACT_ALARM`：精确提醒
 - `RECEIVE_BOOT_COMPLETED`：重启后恢复提醒排程
 - `VIBRATE`：完成与提醒触感
+- `READ_MEDIA_IMAGES` / `READ_MEDIA_AUDIO`：选择习惯图标和导入提示音
+- `READ_EXTERNAL_STORAGE`（旧版 Android）：兼容旧系统媒体读取
+- `WRITE_EXTERNAL_STORAGE`（Android 9 及以下）：保存导入到通知音目录
+- `MODIFY_AUDIO_SETTINGS`：声音试听与诊断（普通权限，无弹窗）
+- `ACCESS_NOTIFICATION_POLICY`：可选的免打扰状态查看权限
 
-所有提醒都遵循系统静音、免打扰和通知渠道设置，不绕过用户的系统选择。
+Android 没有单独的「声音权限」。通知声音由通知渠道、通知音量、铃声模式和免打扰共同决定。应用会在「设置 → 声音诊断」显示当前状态，但不会绕过系统静音或免打扰。
 
 ---
 

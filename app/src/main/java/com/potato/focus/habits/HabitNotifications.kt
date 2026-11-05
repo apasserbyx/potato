@@ -105,13 +105,17 @@ object HabitNotifications {
         }
     }
 
-    fun postTest(context: Context) {
-        val channel = HabitNotificationChannels.globalChannel(context)
+    fun postTest(context: Context, soundKeyOverride: String? = null) {
         val settings = SettingsStore(context)
+        val level = runCatching {
+            HabitAlertLevel.valueOf(settings.habitAlertLevel)
+        }.getOrDefault(HabitAlertLevel.STANDARD)
+        val soundKey = soundKeyOverride ?: settings.habitSoundKey
+        val channel = HabitNotificationChannels.ensureChannel(context, soundKey, level)
         val builder = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_stat_timer)
             .setContentTitle("Potato 习惯提醒测试")
-            .setContentText("当前提示音：${HabitSounds.label(settings.habitSoundKey)}")
+            .setContentText("当前提示音：${HabitSounds.label(soundKey)}")
             .setContentIntent(openHabits(context))
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)

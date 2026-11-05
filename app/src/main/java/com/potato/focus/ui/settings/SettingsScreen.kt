@@ -3,8 +3,10 @@ package com.potato.focus.ui.settings
 import android.Manifest
 import android.app.Activity
 import android.app.AlarmManager
+import android.app.NotificationManager
 import android.app.TimePickerDialog
 import android.content.Intent
+import android.media.AudioManager
 import android.media.RingtoneManager
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -57,6 +59,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -86,14 +89,17 @@ import com.potato.focus.ui.components.SectionLabel
 import com.potato.focus.ui.components.TagPill
 import com.potato.focus.ui.habits.HabitSoundPickerDialog
 import com.potato.focus.ui.theme.Potato
+import com.potato.focus.util.CustomSoundStorage
 import com.potato.focus.util.DataExport
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(onDataChanged: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as PotatoApp
     val palette = Potato.palette
+    val scope = rememberCoroutineScope()
     val settings = app.settings
 
     var goal by remember { mutableIntStateOf(settings.dailyGoalMinutes) }
@@ -120,6 +126,7 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
     }
     var showHabitSoundPicker by remember { mutableStateOf(false) }
     var channelStatusVersion by remember { mutableIntStateOf(0) }
+    var soundImportMessage by remember { mutableStateOf("") }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -151,6 +158,30 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
                 HabitSounds.preview(context, key)
             }
         }
+    }
+
+    val audioPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val key = CustomSoundStorage.import(context, uri)
+                if (key != null) {
+                    habitSoundKey = key
+                    settings.habitSoundKey = key
+                    soundImportMessage = ""
+                    HabitSounds.preview(context, key)
+                } else {
+                    soundImportMessage = "导入失败：请选择小于 5MB 的音频文件"
+                }
+            }
+        }
+    }
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        audioPickerLauncher.launch(arrayOf("audio/*"))
     }
 
     fun reloadPresets() {
@@ -241,6 +272,61 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
         }
         runCatching { ringtoneLauncher.launch(intent) }
     }
+
+    fun openAudioImporter() {
+        val permissions = when {
+            Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
+            Build.VERSION.SDK_INT <= 28 -> arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+            else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+        val missing = permissions.filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) {
+            audioPickerLauncher.launch(arrayOf("audio/*"))
+        } else {
+            audioPermissionLauncher.launch(missing.toTypedArray())
+        }
+    }
+
+    fun openSoundSettings() {
+        runCatching {
+            context.startActivity(
+                Intent(Settings.ACTION_SOUND_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+    }
+
+    fun openDndAccessSettings() {
+        runCatching {
+            context.startActivity(
+                Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+    }
+
+    fun openDndSettings() {
+        runCatching {
+            context.startActivity(
+                Intent("android.settings.ZEN_MODE_SETTINGS")
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+    }
+
+    val audioManager = remember { context.getSystemService(AudioManager::class.java) }
+    val notificationManager = remember { context.getSystemService(NotificationManager::class.java) }
+    val notificationVolume = audioManager.getStreamVolume(AudioManager.STREAM_NOTIFICATION)
+    val notificationMax = audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION)
+    val notificationMuted = audioManager.isStreamMute(AudioManager.STREAM_NOTIFICATION)
+    val ringerMode = audioManager.ringerMode
+    val dndAccess = notificationManager.isNotificationPolicyAccessGranted
+    val dndActive = dndAccess &&
+        notificationManager.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_ALL
 
     fun openHabitChannelSettings(channelId: String) {
         val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -548,6 +634,13 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
                         onClick = { launchSystemRingtonePicker() }
                     )
                     DividerLine()
+                    SettingRow(
+                        title = "导入本地提示音",
+                        subtitle = "选择小于 5MB 的音频文件；会请求媒体读取权限",
+                        trailing = "导入",
+                        onClick = { openAudioImporter() }
+                    )
+                    DividerLine()
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) {
                         Text(
                             "提醒强度",
@@ -622,6 +715,17 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
             }
         }
 
+        if (soundImportMessage.isNotBlank()) {
+            item {
+                Text(
+                    soundImportMessage,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = palette.danger,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            }
+        }
+
         item {
             Text(
                 "每个时段每天最多提醒一次，只列出仍未完成的习惯。",
@@ -629,6 +733,63 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
                 color = palette.muted,
                 modifier = Modifier.padding(horizontal = 4.dp)
             )
+        }
+
+        item { SectionLabel("声音诊断") }
+
+        item {
+            PotatoCard(Modifier.fillMaxWidth()) {
+                Column {
+                    Text(
+                        "Android 没有单独的「声音权限」。通知声音由通知渠道、通知音量、铃声模式和免打扰共同决定。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = palette.muted,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp)
+                    )
+                    DividerLine()
+                    SettingRow(
+                        title = "通知音量",
+                        subtitle = if (notificationMuted || notificationVolume == 0) {
+                            "已静音或音量为 0，系统不会播放提醒声音"
+                        } else {
+                            "$notificationVolume / $notificationMax"
+                        },
+                        trailing = "打开",
+                        onClick = { openSoundSettings() }
+                    )
+                    DividerLine()
+                    SettingRow(
+                        title = "铃声模式",
+                        subtitle = when (ringerMode) {
+                            AudioManager.RINGER_MODE_SILENT -> "静音模式，通知声音会被关闭"
+                            AudioManager.RINGER_MODE_VIBRATE -> "振动模式，通知声音可能被关闭"
+                            else -> "正常模式"
+                        },
+                        trailing = "打开",
+                        onClick = { openSoundSettings() }
+                    )
+                    DividerLine()
+                    SettingRow(
+                        title = "免打扰",
+                        subtitle = when {
+                            !dndAccess -> "未授权查看；如果开启了免打扰，提醒会被静音"
+                            dndActive -> "免打扰已开启，通知声音会被静音"
+                            else -> "免打扰已关闭"
+                        },
+                        trailing = if (dndAccess) "设置" else "授权",
+                        onClick = {
+                            if (dndAccess) openDndSettings() else openDndAccessSettings()
+                        }
+                    )
+                    DividerLine()
+                    SettingRow(
+                        title = "内置声音测试",
+                        subtitle = "使用「土豆叮」测试，排查自定义铃声问题",
+                        trailing = "播放",
+                        onClick = { HabitNotifications.postTest(context, "chime") }
+                    )
+                }
+            }
         }
 
         item { SectionLabel("专注体验") }
