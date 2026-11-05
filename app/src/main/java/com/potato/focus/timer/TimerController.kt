@@ -7,6 +7,7 @@ import com.potato.focus.data.Preset
 import com.potato.focus.data.SessionMode
 import com.potato.focus.data.SessionStatus
 import com.potato.focus.data.TaskItem
+import com.potato.focus.habits.HabitSounds
 import com.potato.focus.util.TimeFormat
 
 data class StopResult(
@@ -326,6 +327,7 @@ class TimerController(context: Context) {
                 app.settings.completedFocusCount = count
                 val withCount = completed.copy(completedFocusCount = count)
                 val nextPhase = TimerMath.nextPhase(withCount, count)
+                HabitSounds.playReminder(appContext, app.settings.timerFocusSoundKey)
                 TimerNotifications.postFocusComplete(appContext, snapshot, nextPhase)
                 if (snapshot.autoStartBreak) {
                     startBreak(withCount, nextPhase, now)
@@ -334,6 +336,7 @@ class TimerController(context: Context) {
                 }
             }
             TimerPhase.SHORT_BREAK, TimerPhase.LONG_BREAK -> {
+                HabitSounds.playReminder(appContext, app.settings.timerBreakSoundKey)
                 TimerNotifications.postBreakComplete(appContext, snapshot)
                 if (snapshot.autoStartFocus) {
                     startFocusInternal(completed.copy(completedFocusCount = count), now)

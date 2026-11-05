@@ -74,6 +74,14 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_HABIT_USE_APP_SOUND, true)
         set(value) = prefs.edit().putBoolean(KEY_HABIT_USE_APP_SOUND, value).apply()
 
+    var timerFocusSoundKey: String
+        get() = prefs.getString(KEY_TIMER_FOCUS_SOUND, "chime") ?: "chime"
+        set(value) = prefs.edit().putString(KEY_TIMER_FOCUS_SOUND, value).apply()
+
+    var timerBreakSoundKey: String
+        get() = prefs.getString(KEY_TIMER_BREAK_SOUND, "bell") ?: "bell"
+        set(value) = prefs.edit().putString(KEY_TIMER_BREAK_SOUND, value).apply()
+
     fun habitSlotMinutes(slot: HabitReminderSlot): Int = when (slot) {
         HabitReminderSlot.MORNING -> prefs.getInt(KEY_HABIT_MORNING, 8 * 60 + 30)
         HabitReminderSlot.AFTERNOON -> prefs.getInt(KEY_HABIT_AFTERNOON, 14 * 60)
@@ -140,5 +148,7 @@ class SettingsStore(context: Context) {
         private const val KEY_HABIT_FOLLOW_UP = "habit_follow_up_enabled"
         private const val KEY_HABIT_CHANNEL_GENERATION = "habit_channel_generation"
         private const val KEY_HABIT_USE_APP_SOUND = "habit_use_app_sound"
+        private const val KEY_TIMER_FOCUS_SOUND = "timer_focus_sound"
+        private const val KEY_TIMER_BREAK_SOUND = "timer_break_sound"
     }
 }

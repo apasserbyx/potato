@@ -16,6 +16,7 @@ import com.potato.focus.util.TimeFormat
 object TimerNotifications {
     const val CHANNEL_ONGOING = "timer_ongoing"
     const val CHANNEL_END = "timer_end"
+    const val CHANNEL_END_APP = "timer_end_app"
     const val CHANNEL_REMINDER = "reminder"
 
     const val ID_ONGOING = 1001
@@ -45,6 +46,16 @@ object TimerNotifications {
             enableVibration(true)
             vibrationPattern = longArrayOf(0, 180, 100, 180)
         }
+        val endApp = NotificationChannel(
+            CHANNEL_END_APP,
+            "计时结束 · App 播放",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "专注完成和休息结束，由 App 直接播放提示音"
+            setSound(null, null)
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 180, 100, 180)
+        }
         val reminder = NotificationChannel(
             CHANNEL_REMINDER,
             "节奏提醒",
@@ -52,7 +63,7 @@ object TimerNotifications {
         ).apply {
             description = "每日目标与专注时段提醒"
         }
-        manager.createNotificationChannels(listOf(ongoing, end, reminder))
+        manager.createNotificationChannels(listOf(ongoing, end, endApp, reminder))
     }
 
     fun ongoing(context: Context, snapshot: TimerSnapshot): android.app.Notification {
@@ -139,7 +150,7 @@ object TimerNotifications {
         } else {
             "已记录 ${snapshot.focusMin} 分钟 · $task。站起来伸个懒腰吧。"
         }
-        val builder = NotificationCompat.Builder(context, CHANNEL_END)
+        val builder = NotificationCompat.Builder(context, CHANNEL_END_APP)
             .setSmallIcon(R.drawable.ic_stat_timer)
             .setContentTitle("这一颗，熟了。")
             .setContentText(text)
@@ -148,8 +159,6 @@ object TimerNotifications {
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setVibrate(longArrayOf(0, 180, 100, 180))
         runCatching {
             NotificationManagerCompat.from(context).notify(ID_FOCUS_END, builder.build())
         }
@@ -177,7 +186,7 @@ object TimerNotifications {
         } else {
             "准备好下一颗了吗？点一下就开始。"
         }
-        val builder = NotificationCompat.Builder(context, CHANNEL_END)
+        val builder = NotificationCompat.Builder(context, CHANNEL_END_APP)
             .setSmallIcon(R.drawable.ic_stat_timer)
             .setContentTitle("休息结束")
             .setContentText(text)
@@ -185,7 +194,6 @@ object TimerNotifications {
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
         if (!snapshot.autoStartFocus) {
             builder.addAction(
                 0,

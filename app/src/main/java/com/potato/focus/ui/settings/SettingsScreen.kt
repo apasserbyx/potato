@@ -3,11 +3,8 @@ package com.potato.focus.ui.settings
 import android.Manifest
 import android.app.Activity
 import android.app.AlarmManager
-import android.app.NotificationManager
 import android.app.TimePickerDialog
 import android.content.Intent
-import android.media.AudioDeviceInfo
-import android.media.AudioManager
 import android.media.RingtoneManager
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -82,7 +79,6 @@ import com.potato.focus.data.HabitAlertLevel
 import com.potato.focus.data.HabitReminderSlot
 import com.potato.focus.data.Preset
 import com.potato.focus.habits.HabitNotificationChannels
-import com.potato.focus.habits.HabitNotifications
 import com.potato.focus.habits.HabitReminderScheduler
 import com.potato.focus.habits.HabitSounds
 import com.potato.focus.ui.components.PotatoCard
@@ -94,6 +90,8 @@ import com.potato.focus.util.CustomSoundStorage
 import com.potato.focus.util.DataExport
 import java.util.Locale
 import kotlinx.coroutines.launch
+
+private enum class SoundTarget { HABIT, TIMER_FOCUS, TIMER_BREAK }
 
 @Composable
 fun SettingsScreen(onDataChanged: () -> Unit) {
@@ -129,6 +127,11 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
     var channelStatusVersion by remember { mutableIntStateOf(0) }
     var soundImportMessage by remember { mutableStateOf("") }
     var useAppSound by remember { mutableStateOf(settings.habitUseAppSound) }
+    var timerFocusSoundKey by remember { mutableStateOf(settings.timerFocusSoundKey) }
+    var timerBreakSoundKey by remember { mutableStateOf(settings.timerBreakSoundKey) }
+    var showTimerFocusPicker by remember { mutableStateOf(false) }
+    var showTimerBreakPicker by remember { mutableStateOf(false) }
+    var audioTarget by remember { mutableStateOf(SoundTarget.HABIT) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -169,8 +172,20 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
             scope.launch {
                 val key = CustomSoundStorage.import(context, uri)
                 if (key != null) {
-                    habitSoundKey = key
-                    settings.habitSoundKey = key
+                    when (audioTarget) {
+                        SoundTarget.HABIT -> {
+                            habitSoundKey = key
+                            settings.habitSoundKey = key
+                        }
+                        SoundTarget.TIMER_FOCUS -> {
+                            timerFocusSoundKey = key
+                            settings.timerFocusSoundKey = key
+                        }
+                        SoundTarget.TIMER_BREAK -> {
+                            timerBreakSoundKey = key
+                            settings.timerBreakSoundKey = key
+                        }
+                    }
                     soundImportMessage = ""
                     HabitSounds.preview(context, key)
                 } else {
@@ -275,7 +290,8 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
         runCatching { ringtoneLauncher.launch(intent) }
     }
 
-    fun openAudioImporter() {
+    fun openAudioImporter(target: SoundTarget) {
+        audioTarget = target
         val permissions = when {
             Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
             Build.VERSION.SDK_INT <= 28 -> arrayOf(
@@ -294,57 +310,6 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
         }
     }
 
-    fun openSoundSettings() {
-        runCatching {
-            context.startActivity(
-                Intent(Settings.ACTION_SOUND_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        }
-    }
-
-    fun openDndAccessSettings() {
-        runCatching {
-            context.startActivity(
-                Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        }
-    }
-
-    fun openBluetoothSettings() {
-        runCatching {
-            context.startActivity(
-                Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        }
-    }
-
-    fun openDndSettings() {
-        runCatching {
-            context.startActivity(
-                Intent("android.settings.ZEN_MODE_SETTINGS")
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        }
-    }
-
-    val audioManager = remember { context.getSystemService(AudioManager::class.java) }
-    val notificationManager = remember { context.getSystemService(NotificationManager::class.java) }
-    val notificationVolume = audioManager.getStreamVolume(AudioManager.STREAM_NOTIFICATION)
-    val notificationMax = audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION)
-    val notificationMuted = audioManager.isStreamMute(AudioManager.STREAM_NOTIFICATION)
-    val mediaVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-    val mediaMax = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-    val mediaMuted = audioManager.isStreamMute(AudioManager.STREAM_MUSIC)
-    val outputLabels = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-        .mapNotNull { audioOutputLabel(it.type) }
-        .distinct()
-    val ringerMode = audioManager.ringerMode
-    val dndAccess = notificationManager.isNotificationPolicyAccessGranted
-    val dndActive = dndAccess &&
-        notificationManager.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_ALL
-
     fun openHabitChannelSettings(channelId: String) {
         val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
@@ -357,14 +322,6 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
             }
         }
         runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-    }
-
-    fun sendHabitTestReminder() {
-        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
-            enableNotifications()
-        } else {
-            HabitNotifications.postTest(context)
-        }
     }
 
     LazyColumn(
@@ -655,8 +612,42 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
                         title = "导入本地提示音",
                         subtitle = "选择小于 5MB 的音频文件；会请求媒体读取权限",
                         trailing = "导入",
-                        onClick = { openAudioImporter() }
+                        onClick = { openAudioImporter(SoundTarget.HABIT) }
                     )
+                    DividerLine()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "使用 App 直接播放习惯提醒音",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = palette.ink
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                "不依赖系统通知渠道，避免厂商拦截声音；会尊重静音、媒体音量和免打扰。",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = palette.muted
+                            )
+                        }
+                        Switch(
+                            checked = useAppSound,
+                            onCheckedChange = {
+                                useAppSound = it
+                                settings.habitUseAppSound = it
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = palette.focus,
+                                uncheckedThumbColor = palette.muted,
+                                uncheckedTrackColor = palette.line
+                            )
+                        )
+                    }
                     DividerLine()
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) {
                         Text(
@@ -712,9 +703,9 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
                         trailing = when {
                             !habitChannelStatus.appNotificationsEnabled -> "去开启"
                             !habitChannelStatus.channelEnabled -> "去设置"
-                            habitChannelStatus.appSoundMode -> "测试"
-                            !habitChannelStatus.soundEnabled -> "修复声音"
-                            else -> "测试"
+                            !habitChannelStatus.appSoundMode &&
+                                !habitChannelStatus.soundEnabled -> "修复声音"
+                            else -> "已就绪"
                         },
                         onClick = {
                             when {
@@ -722,14 +713,12 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
                                     enableNotifications()
                                 !habitChannelStatus.channelEnabled ->
                                     openHabitChannelSettings(habitChannelStatus.channelId)
-                                habitChannelStatus.appSoundMode ->
-                                    sendHabitTestReminder()
-                                !habitChannelStatus.soundEnabled -> {
+                                !habitChannelStatus.appSoundMode &&
+                                    !habitChannelStatus.soundEnabled -> {
                                     HabitNotificationChannels.repairChannel(context)
                                     channelStatusVersion++
-                                    sendHabitTestReminder()
                                 }
-                                else -> sendHabitTestReminder()
+                                else -> Unit
                             }
                         }
                     )
@@ -757,127 +746,30 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
             )
         }
 
-        item { SectionLabel("声音诊断") }
+        item { SectionLabel("计时提示音") }
 
         item {
             PotatoCard(Modifier.fillMaxWidth()) {
                 Column {
+                    SettingRow(
+                        title = "专注完成提示音",
+                        subtitle = "土豆钟专注阶段自然完成时播放 · ${HabitSounds.label(timerFocusSoundKey)}",
+                        trailing = "选择",
+                        onClick = { showTimerFocusPicker = true }
+                    )
+                    DividerLine()
+                    SettingRow(
+                        title = "休息结束提示音",
+                        subtitle = "短休或长休结束时播放 · ${HabitSounds.label(timerBreakSoundKey)}",
+                        trailing = "选择",
+                        onClick = { showTimerBreakPicker = true }
+                    )
+                    DividerLine()
                     Text(
-                        "Android 没有单独的「声音权限」。通知声音由通知渠道、通知音量、铃声模式和免打扰共同决定。",
-                        style = MaterialTheme.typography.bodyMedium,
+                        "计时提示音由 App 直接播放，不依赖系统通知渠道。",
+                        style = MaterialTheme.typography.labelMedium,
                         color = palette.muted,
-                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp)
-                    )
-                    DividerLine()
-                    SettingRow(
-                        title = "通知音量",
-                        subtitle = if (notificationMuted || notificationVolume == 0) {
-                            "已静音或音量为 0，系统不会播放提醒声音"
-                        } else {
-                            "$notificationVolume / $notificationMax"
-                        },
-                        trailing = "打开",
-                        onClick = { openSoundSettings() }
-                    )
-                    DividerLine()
-                    SettingRow(
-                        title = "媒体音量",
-                        subtitle = if (mediaMuted || mediaVolume == 0) {
-                            "已静音或音量为 0，App 内试听也会无声"
-                        } else {
-                            "$mediaVolume / $mediaMax"
-                        },
-                        trailing = "打开",
-                        onClick = { openSoundSettings() }
-                    )
-                    DividerLine()
-                    SettingRow(
-                        title = "音频输出",
-                        subtitle = if (outputLabels.isEmpty()) {
-                            "未检测到输出设备"
-                        } else {
-                            outputLabels.joinToString(" / ") +
-                                if (outputLabels.any { it.contains("蓝牙") }) {
-                                    " · 当前有蓝牙输出，请检查蓝牙设备音量"
-                                } else ""
-                        },
-                        trailing = "蓝牙设置",
-                        onClick = { openBluetoothSettings() }
-                    )
-                    DividerLine()
-                    SettingRow(
-                        title = "铃声模式",
-                        subtitle = when (ringerMode) {
-                            AudioManager.RINGER_MODE_SILENT -> "静音模式，通知声音会被关闭"
-                            AudioManager.RINGER_MODE_VIBRATE -> "振动模式，通知声音可能被关闭"
-                            else -> "正常模式"
-                        },
-                        trailing = "打开",
-                        onClick = { openSoundSettings() }
-                    )
-                    DividerLine()
-                    SettingRow(
-                        title = "免打扰",
-                        subtitle = when {
-                            !dndAccess -> "未授权查看；如果开启了免打扰，提醒会被静音"
-                            dndActive -> "免打扰已开启，通知声音会被静音"
-                            else -> "免打扰已关闭"
-                        },
-                        trailing = if (dndAccess) "设置" else "授权",
-                        onClick = {
-                            if (dndAccess) openDndSettings() else openDndAccessSettings()
-                        }
-                    )
-                    DividerLine()
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 18.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                "使用 App 直接播放提醒音",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = palette.ink
-                            )
-                            Spacer(Modifier.height(3.dp))
-                            Text(
-                                "不依赖系统通知渠道，避免 OPPO / 一加等机型拦截声音。会尊重静音、媒体音量和免打扰。",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = palette.muted
-                            )
-                        }
-                        Switch(
-                            checked = useAppSound,
-                            onCheckedChange = {
-                                useAppSound = it
-                                settings.habitUseAppSound = it
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = palette.focus,
-                                uncheckedThumbColor = palette.muted,
-                                uncheckedTrackColor = palette.line
-                            )
-                        )
-                    }
-                    DividerLine()
-                    SettingRow(
-                        title = "App 内直接试听",
-                        subtitle = "绕过通知渠道，直接用媒体音量播放「土豆叮」",
-                        trailing = "播放",
-                        onClick = {
-                            HabitSounds.stopPreview()
-                            HabitSounds.preview(context, "chime")
-                        }
-                    )
-                    DividerLine()
-                    SettingRow(
-                        title = "当前提醒方式测试",
-                        subtitle = "按当前方式播放一次「土豆叮」，验证实际提醒效果",
-                        trailing = "播放",
-                        onClick = { HabitNotifications.postTest(context, "chime") }
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp)
                     )
                 }
             }
@@ -1069,25 +961,46 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
             }
         )
     }
+
+    if (showTimerFocusPicker) {
+        HabitSoundPickerDialog(
+            currentKey = timerFocusSoundKey,
+            allowFollowGlobal = false,
+            onDismiss = {
+                showTimerFocusPicker = false
+                HabitSounds.stopPreview()
+            },
+            onSelect = { key ->
+                timerFocusSoundKey = key
+                settings.timerFocusSoundKey = key
+            },
+            onImportAudio = {
+                showTimerFocusPicker = false
+                openAudioImporter(SoundTarget.TIMER_FOCUS)
+            }
+        )
+    }
+
+    if (showTimerBreakPicker) {
+        HabitSoundPickerDialog(
+            currentKey = timerBreakSoundKey,
+            allowFollowGlobal = false,
+            onDismiss = {
+                showTimerBreakPicker = false
+                HabitSounds.stopPreview()
+            },
+            onSelect = { key ->
+                timerBreakSoundKey = key
+                settings.timerBreakSoundKey = key
+            },
+            onImportAudio = {
+                showTimerBreakPicker = false
+                openAudioImporter(SoundTarget.TIMER_BREAK)
+            }
+        )
+    }
 }
 
-private fun audioOutputLabel(type: Int): String? = when (type) {
-    AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "扬声器"
-    AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "听筒"
-    AudioDeviceInfo.TYPE_WIRED_HEADSET,
-    AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "有线耳机"
-    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
-    AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
-    AudioDeviceInfo.TYPE_BLE_HEADSET,
-    AudioDeviceInfo.TYPE_BLE_SPEAKER,
-    AudioDeviceInfo.TYPE_BLE_BROADCAST -> "蓝牙"
-    AudioDeviceInfo.TYPE_USB_HEADSET,
-    AudioDeviceInfo.TYPE_USB_DEVICE -> "USB"
-    AudioDeviceInfo.TYPE_HDMI,
-    AudioDeviceInfo.TYPE_HDMI_ARC,
-    AudioDeviceInfo.TYPE_HDMI_EARC -> "HDMI"
-    else -> null
-}
 
 @Composable
 private fun AlertLevelChip(
