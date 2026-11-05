@@ -1,9 +1,11 @@
 package com.potato.focus.ui.settings
 
 import android.Manifest
+import android.app.Activity
 import android.app.AlarmManager
 import android.app.TimePickerDialog
 import android.content.Intent
+import android.media.RingtoneManager
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -68,15 +70,21 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.IntentCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.potato.focus.PotatoApp
+import com.potato.focus.data.HabitAlertLevel
 import com.potato.focus.data.HabitReminderSlot
 import com.potato.focus.data.Preset
+import com.potato.focus.habits.HabitNotificationChannels
+import com.potato.focus.habits.HabitNotifications
 import com.potato.focus.habits.HabitReminderScheduler
+import com.potato.focus.habits.HabitSounds
 import com.potato.focus.ui.components.PotatoCard
 import com.potato.focus.ui.components.SectionLabel
 import com.potato.focus.ui.components.TagPill
+import com.potato.focus.ui.habits.HabitSoundPickerDialog
 import com.potato.focus.ui.theme.Potato
 import com.potato.focus.util.DataExport
 import java.util.Locale
@@ -103,11 +111,46 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
     var habitMorningEnabled by remember { mutableStateOf(settings.habitSlotEnabled(HabitReminderSlot.MORNING)) }
     var habitAfternoonEnabled by remember { mutableStateOf(settings.habitSlotEnabled(HabitReminderSlot.AFTERNOON)) }
     var habitEveningEnabled by remember { mutableStateOf(settings.habitSlotEnabled(HabitReminderSlot.EVENING)) }
+    var habitSoundKey by remember { mutableStateOf(settings.habitSoundKey) }
+    var habitAlertLevel by remember {
+        mutableStateOf(
+            runCatching { HabitAlertLevel.valueOf(settings.habitAlertLevel) }
+                .getOrDefault(HabitAlertLevel.STANDARD)
+        )
+    }
+    var showHabitSoundPicker by remember { mutableStateOf(false) }
+    var channelStatusVersion by remember { mutableIntStateOf(0) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {
         notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
+    }
+
+    val ringtoneLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val uri = result.data?.let {
+                IntentCompat.getParcelableExtra(
+                    it,
+                    RingtoneManager.EXTRA_RINGTONE_PICKED_URI,
+                    Uri::class.java
+                )
+            }
+            if (uri != null) {
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+                val key = "system:$uri"
+                habitSoundKey = key
+                settings.habitSoundKey = key
+                HabitSounds.preview(context, key)
+            }
+        }
     }
 
     fun reloadPresets() {
@@ -117,6 +160,7 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
     LaunchedEffect(Unit) { reloadPresets() }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
+        channelStatusVersion++
     }
 
     fun openNotificationSettings() {
@@ -149,6 +193,14 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
     val exactAlarmOk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
     } else true
+    val habitChannelStatus = remember(
+        notificationsEnabled,
+        habitSoundKey,
+        habitAlertLevel,
+        channelStatusVersion
+    ) {
+        HabitNotificationChannels.status(context)
+    }
 
     fun pickHabitTime(
         slot: HabitReminderSlot,
@@ -173,6 +225,43 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
         update(enabled)
         settings.setHabitSlotEnabled(slot, enabled)
         HabitReminderScheduler.scheduleAll(context)
+    }
+
+    fun launchSystemRingtonePicker() {
+        val previewUri = if (habitSoundKey.startsWith("system:")) {
+            runCatching { Uri.parse(habitSoundKey.removePrefix("system:")) }.getOrNull()
+        } else {
+            null
+        }
+        val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+            putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION)
+            putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+            putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+            putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, previewUri)
+        }
+        runCatching { ringtoneLauncher.launch(intent) }
+    }
+
+    fun openHabitChannelSettings(channelId: String) {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
+                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
+            }
+        } else {
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            }
+        }
+        runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    }
+
+    fun sendHabitTestReminder() {
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+            enableNotifications()
+        } else {
+            HabitNotifications.postTest(context)
+        }
     }
 
     LazyColumn(
@@ -443,6 +532,93 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
         }
 
         item {
+            PotatoCard(Modifier.fillMaxWidth()) {
+                Column {
+                    SettingRow(
+                        title = "默认习惯提示音",
+                        subtitle = "汇总提醒和未单独设置的独立提醒使用",
+                        trailing = HabitSounds.label(habitSoundKey),
+                        onClick = { showHabitSoundPicker = true }
+                    )
+                    DividerLine()
+                    SettingRow(
+                        title = "系统铃声",
+                        subtitle = "从系统提示音中选择一个声音",
+                        trailing = "选择",
+                        onClick = { launchSystemRingtonePicker() }
+                    )
+                    DividerLine()
+                    Column(Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) {
+                        Text(
+                            "提醒强度",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = palette.ink
+                        )
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            "轻柔不发声；醒目会尝试 heads-up 提醒",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = palette.muted
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AlertLevelChip(
+                                "轻柔",
+                                habitAlertLevel == HabitAlertLevel.GENTLE
+                            ) {
+                                habitAlertLevel = HabitAlertLevel.GENTLE
+                                settings.habitAlertLevel = HabitAlertLevel.GENTLE.name
+                            }
+                            AlertLevelChip(
+                                "标准",
+                                habitAlertLevel == HabitAlertLevel.STANDARD
+                            ) {
+                                habitAlertLevel = HabitAlertLevel.STANDARD
+                                settings.habitAlertLevel = HabitAlertLevel.STANDARD.name
+                            }
+                            AlertLevelChip(
+                                "醒目",
+                                habitAlertLevel == HabitAlertLevel.STRONG
+                            ) {
+                                habitAlertLevel = HabitAlertLevel.STRONG
+                                settings.habitAlertLevel = HabitAlertLevel.STRONG.name
+                            }
+                        }
+                    }
+                    DividerLine()
+                    SettingRow(
+                        title = "提醒状态",
+                        subtitle = when {
+                            !habitChannelStatus.appNotificationsEnabled ->
+                                "通知权限未开启，习惯提醒不会出现"
+                            !habitChannelStatus.channelEnabled ->
+                                "当前声音/强度的通知渠道被系统关闭"
+                            !habitChannelStatus.soundEnabled ->
+                                "提醒声音被系统关闭"
+                            else -> "当前设置可以正常提醒"
+                        },
+                        trailing = when {
+                            !habitChannelStatus.appNotificationsEnabled -> "去开启"
+                            !habitChannelStatus.channelEnabled ||
+                                !habitChannelStatus.soundEnabled -> "去设置"
+                            else -> "测试"
+                        },
+                        onClick = {
+                            when {
+                                !habitChannelStatus.appNotificationsEnabled ->
+                                    enableNotifications()
+                                !habitChannelStatus.channelEnabled ||
+                                    !habitChannelStatus.soundEnabled ->
+                                    openHabitChannelSettings(habitChannelStatus.channelId)
+                                else -> sendHabitTestReminder()
+                            }
+                        }
+                    )
+                }
+            }
+        }
+
+        item {
             Text(
                 "每个时段每天最多提醒一次，只列出仍未完成的习惯。",
                 style = MaterialTheme.typography.labelMedium,
@@ -622,6 +798,45 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
             }
         )
     }
+
+    if (showHabitSoundPicker) {
+        HabitSoundPickerDialog(
+            currentKey = habitSoundKey,
+            allowFollowGlobal = false,
+            onDismiss = {
+                showHabitSoundPicker = false
+                HabitSounds.stopPreview()
+            },
+            onSelect = { key ->
+                habitSoundKey = key
+                settings.habitSoundKey = key
+            }
+        )
+    }
+}
+
+@Composable
+private fun AlertLevelChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val palette = Potato.palette
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelMedium,
+        color = if (selected) palette.focus else palette.muted,
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(if (selected) palette.focusSoft else palette.surfaceRaised)
+            .border(
+                1.dp,
+                if (selected) palette.focus else palette.line,
+                CircleShape
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 6.dp)
+    )
 }
 
 @Composable

@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.potato.focus.habits.HabitReminderScheduler
+import com.potato.focus.habits.HabitSnoozeScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -16,6 +17,7 @@ class BootReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 HabitReminderScheduler.scheduleAll(context)
+                HabitSnoozeScheduler.reschedulePersisted(context)
                 if (action == Intent.ACTION_BOOT_COMPLETED) {
                     val snapshot = TimerStore(context).read()
                     if (!snapshot.isActive) return@launch

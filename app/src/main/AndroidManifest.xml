@@ -49,6 +49,10 @@
             android:exported="false" />
 
         <receiver
+            android:name=".habits.HabitActionReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".timer.BootReceiver"
             android:exported="true">
             <intent-filter>

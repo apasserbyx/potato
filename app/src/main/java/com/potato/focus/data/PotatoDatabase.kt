@@ -98,6 +98,11 @@ class PotatoDatabase(context: Context) : SQLiteOpenHelper(
               weekdays_mask INTEGER NOT NULL DEFAULT 127,
               reminder_slot TEXT NOT NULL DEFAULT 'NONE',
               reminder_enabled INTEGER NOT NULL DEFAULT 1,
+              reminder_mode TEXT NOT NULL DEFAULT 'SLOT',
+              reminder_minutes INTEGER NOT NULL DEFAULT -1,
+              sound_key TEXT NOT NULL DEFAULT '',
+              icon_type TEXT NOT NULL DEFAULT 'EMOJI',
+              icon_image_path TEXT NOT NULL DEFAULT '',
               note TEXT NOT NULL DEFAULT '',
               sort_order INTEGER NOT NULL DEFAULT 0,
               archived_at INTEGER,
@@ -151,10 +156,17 @@ class PotatoDatabase(context: Context) : SQLiteOpenHelper(
             db.execSQL("ALTER TABLE sessions ADD COLUMN habit_id INTEGER")
             createHabitTables(db)
         }
+        if (oldVersion >= 2 && oldVersion < 3) {
+            db.execSQL("ALTER TABLE habits ADD COLUMN reminder_mode TEXT NOT NULL DEFAULT 'SLOT'")
+            db.execSQL("ALTER TABLE habits ADD COLUMN reminder_minutes INTEGER NOT NULL DEFAULT -1")
+            db.execSQL("ALTER TABLE habits ADD COLUMN sound_key TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE habits ADD COLUMN icon_type TEXT NOT NULL DEFAULT 'EMOJI'")
+            db.execSQL("ALTER TABLE habits ADD COLUMN icon_image_path TEXT NOT NULL DEFAULT ''")
+        }
     }
 
     companion object {
-        const val DATABASE_VERSION = 2
+        const val DATABASE_VERSION = 3
     }
 }
 

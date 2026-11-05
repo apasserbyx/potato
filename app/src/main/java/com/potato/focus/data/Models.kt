@@ -77,6 +77,23 @@ enum class HabitReminderSlot {
     NONE
 }
 
+enum class HabitReminderMode {
+    SLOT,
+    INDEPENDENT
+}
+
+enum class HabitIconType {
+    EMOJI,
+    BUILTIN,
+    IMAGE
+}
+
+enum class HabitAlertLevel {
+    GENTLE,
+    STANDARD,
+    STRONG
+}
+
 enum class HabitLogStatus {
     PENDING,
     COMPLETED,
@@ -95,6 +112,11 @@ data class Habit(
     val weekdaysMask: Int,
     val reminderSlot: HabitReminderSlot,
     val reminderEnabled: Boolean,
+    val reminderMode: HabitReminderMode = HabitReminderMode.SLOT,
+    val reminderMinutes: Int = -1,
+    val soundKey: String = "",
+    val iconType: HabitIconType = HabitIconType.EMOJI,
+    val iconImagePath: String = "",
     val note: String,
     val sortOrder: Int,
     val archivedAt: Long?,

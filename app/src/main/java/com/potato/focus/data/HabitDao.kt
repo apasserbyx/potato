@@ -64,6 +64,15 @@ class HabitDao(private val helper: PotatoDatabase) {
             HabitReminderSlot.valueOf(getString(getColumnIndexOrThrow("reminder_slot")))
         }.getOrDefault(HabitReminderSlot.NONE),
         reminderEnabled = getInt(getColumnIndexOrThrow("reminder_enabled")) == 1,
+        reminderMode = runCatching {
+            HabitReminderMode.valueOf(getString(getColumnIndexOrThrow("reminder_mode")))
+        }.getOrDefault(HabitReminderMode.SLOT),
+        reminderMinutes = getInt(getColumnIndexOrThrow("reminder_minutes")),
+        soundKey = getString(getColumnIndexOrThrow("sound_key")),
+        iconType = runCatching {
+            HabitIconType.valueOf(getString(getColumnIndexOrThrow("icon_type")))
+        }.getOrDefault(HabitIconType.EMOJI),
+        iconImagePath = getString(getColumnIndexOrThrow("icon_image_path")),
         note = getString(getColumnIndexOrThrow("note")),
         sortOrder = getInt(getColumnIndexOrThrow("sort_order")),
         archivedAt = getLongOrNull("archived_at"),
@@ -95,6 +104,11 @@ class HabitDao(private val helper: PotatoDatabase) {
         put("weekdays_mask", weekdaysMask)
         put("reminder_slot", reminderSlot.name)
         put("reminder_enabled", if (reminderEnabled) 1 else 0)
+        put("reminder_mode", reminderMode.name)
+        put("reminder_minutes", reminderMinutes)
+        put("sound_key", soundKey)
+        put("icon_type", iconType.name)
+        put("icon_image_path", iconImagePath)
         put("note", note)
         put("sort_order", sortOrder)
         put("archived_at", archivedAt)

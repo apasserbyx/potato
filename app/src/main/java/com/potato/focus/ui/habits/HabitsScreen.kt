@@ -1,6 +1,7 @@
 package com.potato.focus.ui.habits
 
 import android.Manifest
+import android.app.TimePickerDialog
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -62,6 +64,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,21 +82,28 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.potato.focus.PotatoApp
 import com.potato.focus.data.Habit
+import com.potato.focus.data.HabitIconType
 import com.potato.focus.data.HabitLog
+import com.potato.focus.data.HabitReminderMode
 import com.potato.focus.data.HabitReminderSlot
 import com.potato.focus.data.HabitType
 import com.potato.focus.data.HabitStats
+import com.potato.focus.data.SettingsStore
 import com.potato.focus.data.isScheduledOn
+import com.potato.focus.habits.HabitEvents
 import com.potato.focus.habits.HabitReminderScheduler
+import com.potato.focus.habits.HabitSounds
 import com.potato.focus.timer.TimerController
 import com.potato.focus.timer.TimerMath
 import com.potato.focus.timer.TimerSnapshot
 import com.potato.focus.ui.components.PotatoCard
 import com.potato.focus.ui.components.SectionLabel
 import com.potato.focus.ui.theme.Potato
+import com.potato.focus.util.HabitIconStorage
 import com.potato.focus.util.TimeFormat
 import java.time.LocalDate
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 private val slotOrder = listOf(
     HabitReminderSlot.MORNING,
@@ -102,11 +112,10 @@ private val slotOrder = listOf(
     HabitReminderSlot.NONE
 )
 
-private val habitIcons = listOf("📖", "🧘", "🏃", "✍️", "💧", "🌱", "🎯", "🛏️")
 private val habitColors = listOf("#96592F", "#5F7550", "#8F6224", "#8D6E52")
 
 private data class HabitGroup(
-    val slot: HabitReminderSlot,
+    val key: String,
     val title: String,
     val timeLabel: String,
     val habits: List<Habit>
@@ -147,21 +156,23 @@ fun HabitsScreen(
         reload()
     }
 
+    LaunchedEffect(Unit) {
+        HabitEvents.version.collect { reload() }
+    }
+
     val logsByHabit = remember(recentLogs) { HabitStats.logsByHabit(recentLogs) }
-    val scheduled = habits
-        .filter { it.isScheduledOn(today) }
-        .sortedWith(compareBy({ slotOrder.indexOf(it.reminderSlot) }, { it.sortOrder }))
+    val scheduled = habits.filter { it.isScheduledOn(today) }
     val completedCount = scheduled.count { HabitStats.isCompleted(todayLogs[it.id]) }
     val progress = if (scheduled.isEmpty()) 0f else completedCount.toFloat() / scheduled.size
-    val groups = slotOrder.mapNotNull { slot ->
+    val slotGroups = slotOrder.mapNotNull { slot ->
         val rows = scheduled
-            .filter { it.reminderSlot == slot }
+            .filter { it.reminderMode == HabitReminderMode.SLOT && it.reminderSlot == slot }
             .sortedWith(compareBy({ HabitStats.isCompleted(todayLogs[it.id]) }, { it.sortOrder }))
         if (rows.isEmpty()) {
             null
         } else {
             HabitGroup(
-                slot = slot,
+                key = slot.name,
                 title = when (slot) {
                     HabitReminderSlot.MORNING -> "早上"
                     HabitReminderSlot.AFTERNOON -> "下午"
@@ -172,6 +183,14 @@ fun HabitsScreen(
                 habits = rows
             )
         }
+    }
+    val independentRows = scheduled
+        .filter { it.reminderMode == HabitReminderMode.INDEPENDENT }
+        .sortedWith(compareBy({ HabitStats.isCompleted(todayLogs[it.id]) }, { it.reminderMinutes }, { it.sortOrder }))
+    val groups = slotGroups + if (independentRows.isEmpty()) {
+        emptyList()
+    } else {
+        listOf(HabitGroup(key = "independent", title = "独立提醒", timeLabel = "按设定时间", habits = independentRows))
     }
 
     fun startHabit(habit: Habit) {
@@ -210,6 +229,15 @@ fun HabitsScreen(
             permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
             startHabit(habit)
+        }
+    }
+
+    fun requestReminderPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
@@ -327,7 +355,7 @@ fun HabitsScreen(
         }
 
         groups.forEach { group ->
-            item(key = "header-${group.slot.name}") {
+            item(key = "header-${group.key}") {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -418,6 +446,12 @@ fun HabitsScreen(
                     app.habits.update(saved)
                 }
                 HabitReminderScheduler.scheduleAll(context)
+                if (saved.reminderEnabled &&
+                    (saved.reminderMode == HabitReminderMode.INDEPENDENT ||
+                        saved.reminderSlot != HabitReminderSlot.NONE)
+                ) {
+                    requestReminderPermissionIfNeeded()
+                }
                 editingHabit = null
                 reload()
                 onChanged()
@@ -508,15 +542,15 @@ private fun HabitCard(
     ) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(accent.copy(alpha = 0.14f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(habit.icon.ifBlank { "🌱" }, style = MaterialTheme.typography.titleLarge)
-                }
+                HabitIconVisual(
+                    iconType = habit.iconType,
+                    icon = habit.icon,
+                    imagePath = habit.iconImagePath,
+                    contentDescription = habit.name,
+                    size = 42.dp,
+                    background = accent.copy(alpha = 0.14f),
+                    tint = accent
+                )
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -528,12 +562,20 @@ private fun HabitCard(
                     )
                     Spacer(Modifier.height(3.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        val reminderSuffix = if (
+                            habit.reminderMode == HabitReminderMode.INDEPENDENT &&
+                            habit.reminderMinutes in 0..(24 * 60 - 1)
+                        ) {
+                            " · ${formatSlotTime(habit.reminderMinutes)}"
+                        } else {
+                            ""
+                        }
                         Text(
-                            if (habit.type == HabitType.TIMED) {
+                            (if (habit.type == HabitType.TIMED) {
                                 "目标 ${habit.targetSeconds / 60} 分钟"
                             } else {
                                 "目标 ${habit.targetCount} ${habit.unit.ifBlank { "次" }}"
-                            },
+                            }) + reminderSuffix,
                             style = MaterialTheme.typography.labelMedium,
                             color = palette.muted
                         )
@@ -733,6 +775,8 @@ private fun HabitEditorSheet(
     onArchive: () -> Unit
 ) {
     val palette = Potato.palette
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var name by remember(initial.id) { mutableStateOf(initial.name) }
     var type by remember(initial.id) { mutableStateOf(initial.type) }
@@ -746,10 +790,47 @@ private fun HabitEditorSheet(
     var weekdaysMask by remember(initial.id) { mutableIntStateOf(initial.weekdaysMask) }
     var slot by remember(initial.id) { mutableStateOf(initial.reminderSlot) }
     var reminderEnabled by remember(initial.id) { mutableStateOf(initial.reminderEnabled) }
-    var icon by remember(initial.id) { mutableStateOf(initial.icon.ifBlank { habitIcons.first() }) }
+    var reminderMode by remember(initial.id) { mutableStateOf(initial.reminderMode) }
+    var reminderMinutes by remember(initial.id) {
+        mutableIntStateOf(initial.reminderMinutes.takeIf { it in 0..(24 * 60 - 1) } ?: (8 * 60 + 30))
+    }
+    var soundKey by remember(initial.id) { mutableStateOf(initial.soundKey) }
+    var showSoundPicker by remember { mutableStateOf(false) }
+    var iconType by remember(initial.id) { mutableStateOf(initial.iconType) }
+    var icon by remember(initial.id) {
+        mutableStateOf(initial.icon.ifBlank { if (initial.iconType == HabitIconType.EMOJI) "🌱" else "book" })
+    }
+    var iconImagePath by remember(initial.id) { mutableStateOf(initial.iconImagePath) }
     var colorHex by remember(initial.id) { mutableStateOf(initial.color.ifBlank { habitColors.first() }) }
     var note by remember(initial.id) { mutableStateOf(initial.note) }
     var error by remember { mutableStateOf("") }
+
+    val imagePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val path = HabitIconStorage.saveFromUri(context, uri)
+                if (path != null) {
+                    iconImagePath = path
+                    iconType = HabitIconType.IMAGE
+                    error = ""
+                } else {
+                    error = "图片处理失败，请换一张试试"
+                }
+            }
+        }
+    }
+
+    fun pickReminderTime() {
+        TimePickerDialog(
+            context,
+            { _, hour, minute -> reminderMinutes = hour * 60 + minute },
+            reminderMinutes / 60,
+            reminderMinutes % 60,
+            true
+        ).show()
+    }
 
     fun save() {
         if (name.isBlank()) {
@@ -760,11 +841,17 @@ private fun HabitEditorSheet(
             error = "至少选择一个重复日"
             return
         }
+        if (iconType == HabitIconType.IMAGE && iconImagePath.isBlank()) {
+            error = "请选择一张图标图片"
+            return
+        }
         val minutes = minutesText.toIntOrNull()?.coerceIn(1, 180) ?: 25
         val targetCount = countText.toIntOrNull()?.coerceIn(1, 999) ?: 8
         val updated = initial.copy(
             name = name.trim(),
             icon = icon,
+            iconType = iconType,
+            iconImagePath = if (iconType == HabitIconType.IMAGE) iconImagePath else "",
             color = colorHex,
             type = type,
             targetSeconds = if (type == HabitType.TIMED) minutes * 60 else 0,
@@ -773,6 +860,13 @@ private fun HabitEditorSheet(
             weekdaysMask = weekdaysMask,
             reminderSlot = slot,
             reminderEnabled = reminderEnabled,
+            reminderMode = reminderMode,
+            reminderMinutes = if (reminderMode == HabitReminderMode.INDEPENDENT) {
+                reminderMinutes.coerceIn(0, 24 * 60 - 1)
+            } else {
+                -1
+            },
+            soundKey = if (reminderMode == HabitReminderMode.INDEPENDENT) soundKey else "",
             note = note
         )
         onSave(updated)
@@ -795,6 +889,7 @@ private fun HabitEditorSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .statusBarsPadding()
                 .navigationBarsPadding()
                 .imePadding()
                 .verticalScroll(rememberScrollState())
@@ -861,28 +956,85 @@ private fun HabitEditorSheet(
             WeekdaySelector(weekdaysMask) { weekdaysMask = it }
             Spacer(Modifier.height(14.dp))
 
-            Text("提醒时段", style = MaterialTheme.typography.titleMedium, color = palette.ink)
+            Text("提醒方式", style = MaterialTheme.typography.titleMedium, color = palette.ink)
             Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(7.dp)
-            ) {
-                SlotPill("早上", slot == HabitReminderSlot.MORNING) { slot = HabitReminderSlot.MORNING }
-                SlotPill("下午", slot == HabitReminderSlot.AFTERNOON) { slot = HabitReminderSlot.AFTERNOON }
-                SlotPill("晚上", slot == HabitReminderSlot.EVENING) { slot = HabitReminderSlot.EVENING }
-                SlotPill("不提醒", slot == HabitReminderSlot.NONE) { slot = HabitReminderSlot.NONE }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TypePill("跟随时段", reminderMode == HabitReminderMode.SLOT) {
+                    reminderMode = HabitReminderMode.SLOT
+                }
+                TypePill("独立提醒", reminderMode == HabitReminderMode.INDEPENDENT) {
+                    reminderMode = HabitReminderMode.INDEPENDENT
+                    reminderEnabled = true
+                }
             }
-            if (slot != HabitReminderSlot.NONE) {
+            Spacer(Modifier.height(10.dp))
+
+            if (reminderMode == HabitReminderMode.SLOT) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 8.dp),
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    SlotPill("早上", slot == HabitReminderSlot.MORNING) { slot = HabitReminderSlot.MORNING }
+                    SlotPill("下午", slot == HabitReminderSlot.AFTERNOON) { slot = HabitReminderSlot.AFTERNOON }
+                    SlotPill("晚上", slot == HabitReminderSlot.EVENING) { slot = HabitReminderSlot.EVENING }
+                    SlotPill("不提醒", slot == HabitReminderSlot.NONE) { slot = HabitReminderSlot.NONE }
+                }
+                if (slot != HabitReminderSlot.NONE) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "参与该时段的汇总提醒",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = palette.muted,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = reminderEnabled,
+                            onCheckedChange = { reminderEnabled = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = palette.focus,
+                                uncheckedThumbColor = palette.muted,
+                                uncheckedTrackColor = palette.line
+                            )
+                        )
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "每天提醒时间",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = palette.ink
+                        )
+                        Text(
+                            formatSlotTime(reminderMinutes),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = palette.focus
+                        )
+                    }
+                    TextButton(onClick = ::pickReminderTime) {
+                        Text("修改时间")
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "参与该时段的汇总提醒",
+                        "开启提醒",
                         style = MaterialTheme.typography.bodyMedium,
                         color = palette.muted,
                         modifier = Modifier.weight(1f)
@@ -898,6 +1050,22 @@ private fun HabitEditorSheet(
                         )
                     )
                 }
+                if (reminderEnabled) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "提示音",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = palette.ink,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { showSoundPicker = true }) {
+                            Text(HabitSounds.label(soundKey))
+                        }
+                    }
+                }
             }
             Spacer(Modifier.height(14.dp))
 
@@ -907,21 +1075,86 @@ private fun HabitEditorSheet(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                habitIcons.forEach { item ->
+                builtInHabitIcons.forEach { item ->
+                    val selected = iconType == HabitIconType.BUILTIN && icon == item.key
                     Box(
                         modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(if (icon == item) palette.accentSoft else palette.surfaceRaised)
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (selected) palette.accentSoft else palette.surfaceRaised)
                             .border(
                                 1.dp,
-                                if (icon == item) palette.accent else palette.line,
+                                if (selected) palette.accent else palette.line,
+                                RoundedCornerShape(12.dp)
+                            )
+                            .clickable {
+                                iconType = HabitIconType.BUILTIN
+                                icon = item.key
+                                error = ""
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            item.image,
+                            contentDescription = item.label,
+                            tint = if (selected) palette.accent else palette.muted,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                habitEmojis.forEach { item ->
+                    val selected = iconType == HabitIconType.EMOJI && icon == item
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(if (selected) palette.accentSoft else palette.surfaceRaised)
+                            .border(
+                                1.dp,
+                                if (selected) palette.accent else palette.line,
                                 CircleShape
                             )
-                            .clickable { icon = item },
+                            .clickable {
+                                iconType = HabitIconType.EMOJI
+                                icon = item
+                                error = ""
+                            },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(item, style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                HabitIconVisual(
+                    iconType = iconType,
+                    icon = icon,
+                    imagePath = iconImagePath,
+                    contentDescription = "当前习惯图标",
+                    size = 50.dp,
+                    background = habitColor(colorHex).copy(alpha = 0.14f),
+                    tint = habitColor(colorHex)
+                )
+                Spacer(Modifier.width(10.dp))
+                TextButton(onClick = { imagePicker.launch("image/*") }) {
+                    Text("从相册选择")
+                }
+                if (iconImagePath.isNotBlank()) {
+                    TextButton(onClick = {
+                        iconImagePath = ""
+                        if (iconType == HabitIconType.IMAGE) {
+                            iconType = HabitIconType.BUILTIN
+                            icon = "book"
+                        }
+                    }) {
+                        Text("移除图片", color = palette.muted)
                     }
                 }
             }
@@ -990,6 +1223,103 @@ private fun HabitEditorSheet(
                 }
             }
             Spacer(Modifier.height(20.dp))
+        }
+    }
+
+    if (showSoundPicker) {
+        HabitSoundPickerDialog(
+            currentKey = soundKey,
+            allowFollowGlobal = true,
+            onDismiss = { showSoundPicker = false },
+            onSelect = { soundKey = it }
+        )
+    }
+}
+
+@Composable
+internal fun HabitSoundPickerDialog(
+    currentKey: String,
+    allowFollowGlobal: Boolean,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit
+) {
+    val palette = Potato.palette
+    val context = LocalContext.current
+    val globalSoundKey = remember { SettingsStore(context).habitSoundKey }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = palette.surface,
+        title = { Text("习惯提示音") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                if (allowFollowGlobal) {
+                    SoundOptionRow(
+                        label = "跟随全局",
+                        selected = currentKey.isBlank(),
+                        onSelect = { onSelect("") },
+                        onPreview = { HabitSounds.preview(context, globalSoundKey) }
+                    )
+                }
+                HabitSounds.builtInOptions.forEach { option ->
+                    SoundOptionRow(
+                        label = option.label,
+                        selected = currentKey == option.key,
+                        onSelect = { onSelect(option.key) },
+                        onPreview = { HabitSounds.preview(context, option.key) }
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                HabitSounds.stopPreview()
+                onDismiss()
+            }) { Text("完成") }
+        }
+    )
+}
+
+@Composable
+private fun SoundOptionRow(
+    label: String,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    onPreview: () -> Unit
+) {
+    val palette = Potato.palette
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onSelect)
+            .padding(horizontal = 6.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = onPreview) {
+            Icon(
+                Icons.Rounded.PlayArrow,
+                contentDescription = "试听",
+                tint = palette.muted,
+                modifier = Modifier.size(19.dp)
+            )
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = palette.ink,
+            modifier = Modifier.weight(1f)
+        )
+        if (selected) {
+            Icon(
+                Icons.Rounded.Check,
+                contentDescription = "已选择",
+                tint = palette.focus,
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
 }
@@ -1070,7 +1400,7 @@ private fun WeekdaySelector(mask: Int, onChange: (Int) -> Unit) {
 private fun newHabitDraft(sortOrder: Int): Habit = Habit(
     id = 0L,
     name = "",
-    icon = habitIcons.first(),
+    icon = "book",
     color = habitColors.first(),
     type = HabitType.TIMED,
     targetSeconds = 25 * 60,
@@ -1079,6 +1409,11 @@ private fun newHabitDraft(sortOrder: Int): Habit = Habit(
     weekdaysMask = 0b1111111,
     reminderSlot = HabitReminderSlot.NONE,
     reminderEnabled = true,
+    reminderMode = HabitReminderMode.SLOT,
+    reminderMinutes = -1,
+    soundKey = "",
+    iconType = HabitIconType.BUILTIN,
+    iconImagePath = "",
     note = "",
     sortOrder = sortOrder,
     archivedAt = null,

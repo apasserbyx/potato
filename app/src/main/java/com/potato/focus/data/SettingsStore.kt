@@ -53,6 +53,19 @@ class SettingsStore(context: Context) {
         get() = prefs.getLong(KEY_LAST_OPEN_REMINDER, 0L)
         set(value) = prefs.edit().putLong(KEY_LAST_OPEN_REMINDER, value).apply()
 
+    var habitSoundKey: String
+        get() = prefs.getString(KEY_HABIT_SOUND, "default") ?: "default"
+        set(value) = prefs.edit().putString(KEY_HABIT_SOUND, value).apply()
+
+    var habitAlertLevel: String
+        get() = prefs.getString(KEY_HABIT_ALERT_LEVEL, HabitAlertLevel.STANDARD.name)
+            ?: HabitAlertLevel.STANDARD.name
+        set(value) = prefs.edit().putString(KEY_HABIT_ALERT_LEVEL, value).apply()
+
+    var habitFollowUpEnabled: Boolean
+        get() = prefs.getBoolean(KEY_HABIT_FOLLOW_UP, false)
+        set(value) = prefs.edit().putBoolean(KEY_HABIT_FOLLOW_UP, value).apply()
+
     fun habitSlotMinutes(slot: HabitReminderSlot): Int = when (slot) {
         HabitReminderSlot.MORNING -> prefs.getInt(KEY_HABIT_MORNING, 8 * 60 + 30)
         HabitReminderSlot.AFTERNOON -> prefs.getInt(KEY_HABIT_AFTERNOON, 14 * 60)
@@ -114,5 +127,8 @@ class SettingsStore(context: Context) {
         private const val KEY_HABIT_MORNING_ENABLED = "habit_morning_enabled"
         private const val KEY_HABIT_AFTERNOON_ENABLED = "habit_afternoon_enabled"
         private const val KEY_HABIT_EVENING_ENABLED = "habit_evening_enabled"
+        private const val KEY_HABIT_SOUND = "habit_sound_key"
+        private const val KEY_HABIT_ALERT_LEVEL = "habit_alert_level"
+        private const val KEY_HABIT_FOLLOW_UP = "habit_follow_up_enabled"
     }
 }
