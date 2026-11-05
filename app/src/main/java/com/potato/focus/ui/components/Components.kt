@@ -290,6 +290,13 @@ fun SectionLabel(text: String, trailing: String? = null, onTrailing: (() -> Unit
     }
 }
 
+private val navItems = listOf(
+    "专注" to Icons.Rounded.Timer,
+    "习惯" to Icons.Rounded.CheckCircle,
+    "数据" to Icons.Rounded.BarChart,
+    "设置" to Icons.Rounded.Settings
+)
+
 @Composable
 fun BottomNavBar(
     selected: Int,
@@ -311,10 +318,62 @@ fun BottomNavBar(
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            NavItem("专注", Icons.Rounded.Timer, selected == 0) { onSelect(0) }
-            NavItem("习惯", Icons.Rounded.CheckCircle, selected == 1) { onSelect(1) }
-            NavItem("数据", Icons.Rounded.BarChart, selected == 2) { onSelect(2) }
-            NavItem("设置", Icons.Rounded.Settings, selected == 3) { onSelect(3) }
+            navItems.forEachIndexed { index, (label, icon) ->
+                NavItem(label, icon, selected == index) { onSelect(index) }
+            }
+        }
+    }
+}
+
+@Composable
+fun SideNavBar(
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val palette = Potato.palette
+    Surface(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(88.dp),
+        color = palette.surface.copy(alpha = 0.97f)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(horizontal = 8.dp, vertical = 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            PotatoMark(size = 34.dp)
+            Spacer(Modifier.height(18.dp))
+            navItems.forEachIndexed { index, (label, icon) ->
+                val selectedItem = selected == index
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(if (selectedItem) palette.focusSoft else Color.Transparent)
+                        .clickable { onSelect(index) }
+                        .padding(vertical = 10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = label,
+                        tint = if (selectedItem) palette.focus else palette.muted,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (selectedItem) palette.focus else palette.muted,
+                        fontWeight = if (selectedItem) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                }
+            }
+            Spacer(Modifier.weight(1f))
         }
     }
 }

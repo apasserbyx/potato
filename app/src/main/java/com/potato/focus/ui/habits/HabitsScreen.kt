@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -72,6 +73,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -134,6 +136,7 @@ fun HabitsScreen(
     val context = LocalContext.current
     val app = context.applicationContext as PotatoApp
     val palette = Potato.palette
+    val isWide = LocalConfiguration.current.screenWidthDp >= 600
     val haptics = LocalHapticFeedback.current
     val controller = remember { TimerController(context) }
     val today = TimeFormat.localDate(System.currentTimeMillis())
@@ -251,12 +254,13 @@ fun HabitsScreen(
         }
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
+    val listBlock: @Composable (Modifier) -> Unit = { modifier ->
+        LazyColumn(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
         item {
             Spacer(Modifier.height(12.dp))
             Row(
@@ -443,30 +447,104 @@ fun HabitsScreen(
         }
 
         item { Spacer(Modifier.height(24.dp)) }
+        }
     }
 
-    detailHabit?.let { habit ->
-        HabitDetailSheet(
-            habit = habit,
-            logs = detailLogs,
-            today = today,
-            reminderText = habitReminderText(habit, app.settings),
-            onDismiss = { detailHabitId = null },
-            onEdit = {
-                detailHabitId = null
-                editingHabit = habit
-            },
-            onSkipToday = {
-                app.habitLogs.markSkipped(habit.id, today)
-                detailLogs = app.habitLogs.logsForHabit(habit.id)
-                reload()
-                onChanged()
-            },
-            onArchive = {
-                detailHabitId = null
-                pendingArchive = habit
+    if (isWide) {
+        Row(Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .weight(0.56f)
+                    .fillMaxHeight()
+            ) {
+                listBlock(Modifier)
             }
-        )
+            Box(
+                modifier = Modifier
+                    .weight(0.44f)
+                    .fillMaxHeight()
+                    .padding(top = 12.dp, end = 24.dp, bottom = 12.dp)
+            ) {
+                val habit = detailHabit
+                if (habit == null) {
+                    PotatoCard(Modifier.fillMaxSize()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(24.dp),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                "选择一个习惯",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = palette.ink
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                "查看连续天数、热力图和最近记录。",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = palette.muted,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                } else {
+                    PotatoCard(Modifier.fillMaxSize()) {
+                        HabitDetailContent(
+                            habit = habit,
+                            logs = detailLogs,
+                            today = today,
+                            reminderText = habitReminderText(habit, app.settings),
+                            onEdit = {
+                                detailHabitId = null
+                                editingHabit = habit
+                            },
+                            onSkipToday = {
+                                app.habitLogs.markSkipped(habit.id, today)
+                                detailLogs = app.habitLogs.logsForHabit(habit.id)
+                                reload()
+                                onChanged()
+                            },
+                            onArchive = {
+                                detailHabitId = null
+                                pendingArchive = habit
+                            },
+                            onClose = { detailHabitId = null },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+            }
+        }
+    } else {
+        listBlock(Modifier)
+    }
+
+    if (!isWide) {
+        detailHabit?.let { habit ->
+            HabitDetailSheet(
+                habit = habit,
+                logs = detailLogs,
+                today = today,
+                reminderText = habitReminderText(habit, app.settings),
+                onDismiss = { detailHabitId = null },
+                onEdit = {
+                    detailHabitId = null
+                    editingHabit = habit
+                },
+                onSkipToday = {
+                    app.habitLogs.markSkipped(habit.id, today)
+                    detailLogs = app.habitLogs.logsForHabit(habit.id)
+                    reload()
+                    onChanged()
+                },
+                onArchive = {
+                    detailHabitId = null
+                    pendingArchive = habit
+                }
+            )
+        }
     }
 
     editingHabit?.let { habit ->
@@ -982,6 +1060,7 @@ private fun HabitEditorSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = palette.surface,
+        sheetMaxWidth = 680.dp,
         dragHandle = {
             Box(
                 Modifier

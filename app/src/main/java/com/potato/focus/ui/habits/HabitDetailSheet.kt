@@ -60,21 +60,20 @@ import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HabitDetailSheet(
+fun HabitDetailContent(
     habit: Habit,
     logs: List<HabitLog>,
     today: LocalDate,
     reminderText: String,
-    onDismiss: () -> Unit,
     onEdit: () -> Unit,
     onSkipToday: () -> Unit,
-    onArchive: () -> Unit
+    onArchive: () -> Unit,
+    onClose: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
 ) {
     val palette = Potato.palette
     val accent = habitColor(habit.color)
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var rangeDays by remember { mutableIntStateOf(30) }
 
     val logsByDate = remember(logs) {
@@ -98,28 +97,12 @@ fun HabitDetailSheet(
         !HabitStats.isCompleted(todayLog) &&
         !HabitStats.isSkipped(todayLog)
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = palette.surface,
-        dragHandle = {
-            Box(
-                Modifier
-                    .padding(top = 12.dp, bottom = 4.dp)
-                    .size(width = 36.dp, height = 4.dp)
-                    .clip(CircleShape)
-                    .background(palette.line)
-            )
-        }
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp)
-        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 HabitIconVisual(
                     iconType = habit.iconType,
@@ -151,12 +134,14 @@ fun HabitDetailSheet(
                         color = palette.muted
                     )
                 }
-                IconButton(onClick = onDismiss) {
-                    Icon(
-                        Icons.Rounded.Close,
-                        contentDescription = "关闭",
-                        tint = palette.muted
-                    )
+                if (onClose != null) {
+                    IconButton(onClick = onClose) {
+                        Icon(
+                            Icons.Rounded.Close,
+                            contentDescription = "关闭",
+                            tint = palette.muted
+                        )
+                    }
                 }
             }
 
@@ -295,6 +280,49 @@ fun HabitDetailSheet(
             }
             Spacer(Modifier.height(20.dp))
         }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HabitDetailSheet(
+    habit: Habit,
+    logs: List<HabitLog>,
+    today: LocalDate,
+    reminderText: String,
+    onDismiss: () -> Unit,
+    onEdit: () -> Unit,
+    onSkipToday: () -> Unit,
+    onArchive: () -> Unit
+) {
+    val palette = Potato.palette
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = palette.surface,
+        sheetMaxWidth = 680.dp,
+        dragHandle = {
+            Box(
+                Modifier
+                    .padding(top = 12.dp, bottom = 4.dp)
+                    .size(width = 36.dp, height = 4.dp)
+                    .clip(CircleShape)
+                    .background(palette.line)
+            )
+        }
+    ) {
+        HabitDetailContent(
+            habit = habit,
+            logs = logs,
+            today = today,
+            reminderText = reminderText,
+            onEdit = onEdit,
+            onSkipToday = onSkipToday,
+            onArchive = onArchive,
+            onClose = onDismiss,
+            modifier = Modifier
+                .statusBarsPadding()
+                .navigationBarsPadding()
+        )
     }
 }
 

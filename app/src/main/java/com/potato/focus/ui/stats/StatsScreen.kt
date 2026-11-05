@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -16,7 +17,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.LocalFireDepartment
@@ -35,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -64,6 +68,7 @@ fun StatsScreen(refreshKey: Int) {
     val context = LocalContext.current
     val app = context.applicationContext as PotatoApp
     val palette = Potato.palette
+    val isWide = LocalConfiguration.current.screenWidthDp >= 600
     var period by remember { mutableStateOf(StatsPeriod.WEEK) }
     var allSessions by remember { mutableStateOf<List<FocusSession>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
@@ -94,259 +99,329 @@ fun StatsScreen(refreshKey: Int) {
         }
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        item {
-            Spacer(Modifier.height(12.dp))
+    val headerBlock: @Composable () -> Unit = {
+        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("数据", style = MaterialTheme.typography.headlineLarge, color = palette.ink)
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(palette.surfaceRaised)
+                    .padding(4.dp)
             ) {
-                Text("数据", style = MaterialTheme.typography.headlineLarge, color = palette.ink)
+                StatsPeriod.entries.forEach { item ->
+                    Text(
+                        text = item.label,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (period == item) palette.surface else palette.muted,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(if (period == item) palette.ink else Color.Transparent)
+                            .clickable { period = item }
+                            .padding(horizontal = 13.dp, vertical = 6.dp)
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(2.dp))
+        Text(
+            "看得见的时间，才更容易被安排。",
+            style = MaterialTheme.typography.bodyMedium,
+            color = palette.muted
+        )
+    }
+
+    val summaryBlock: @Composable () -> Unit = {
+        PotatoCard(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(20.dp)) {
                 Row(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(palette.surfaceRaised)
-                        .padding(4.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
                 ) {
-                    StatsPeriod.entries.forEach { item ->
+                    Column {
                         Text(
-                            text = item.label,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = if (period == item) palette.surface else palette.muted,
+                            text = when (period) {
+                                StatsPeriod.DAY -> "今天专注"
+                                StatsPeriod.WEEK -> "最近 7 天"
+                                StatsPeriod.MONTH -> "最近 30 天"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = palette.muted
+                        )
+                        Spacer(Modifier.height(5.dp))
+                        Text(
+                            text = TimeFormat.durationText(summary.focusSeconds),
+                            style = MaterialTheme.typography.headlineLarge,
+                            color = palette.ink
+                        )
+                    }
+                    if (summary.streak > 0) {
+                        Row(
                             modifier = Modifier
                                 .clip(CircleShape)
-                                .background(if (period == item) palette.ink else Color.Transparent)
-                                .clickable { period = item }
-                                .padding(horizontal = 13.dp, vertical = 6.dp)
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.height(2.dp))
-            Text(
-                "看得见的时间，才更容易被安排。",
-                style = MaterialTheme.typography.bodyMedium,
-                color = palette.muted
-            )
-        }
-
-        item {
-            PotatoCard(modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Column {
+                                .background(palette.accentSoft)
+                                .padding(horizontal = 12.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Rounded.LocalFireDepartment,
+                                contentDescription = null,
+                                tint = palette.accent,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
                             Text(
-                                text = when (period) {
-                                    StatsPeriod.DAY -> "今天专注"
-                                    StatsPeriod.WEEK -> "最近 7 天"
-                                    StatsPeriod.MONTH -> "最近 30 天"
-                                },
+                                "连续 ${summary.streak} 天",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = palette.muted
-                            )
-                            Spacer(Modifier.height(5.dp))
-                            Text(
-                                text = TimeFormat.durationText(summary.focusSeconds),
-                                style = MaterialTheme.typography.headlineLarge,
-                                color = palette.ink
+                                color = palette.accent,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
-                        if (summary.streak > 0) {
-                            Row(
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(palette.accentSoft)
-                                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    Icons.Rounded.LocalFireDepartment,
-                                    contentDescription = null,
-                                    tint = palette.accent,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(Modifier.width(4.dp))
-                                Text(
-                                    "连续 ${summary.streak} 天",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = palette.accent,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
                     }
-                    Spacer(Modifier.height(14.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Metric("土豆", "${summary.tomatoCount}", "颗", Modifier.weight(1f))
-                        Metric("自由专注", "${summary.openCount}", "次", Modifier.weight(1f))
-                        Metric("完成率", "${(summary.completionRate * 100).toInt()}", "%", Modifier.weight(1f))
-                    }
-                    Spacer(Modifier.height(16.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            if (period == StatsPeriod.DAY) "每日目标 $goal 分钟" else "日均 $averageText",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = palette.muted
-                        )
-                        Text(
-                            if (period == StatsPeriod.DAY) "${(summary.focusSeconds / 60)} / $goal" else "目标 $goal / 天",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = palette.muted
-                        )
-                    }
-                    Spacer(Modifier.height(7.dp))
-                    GoalBar(
-                        progress = if (period == StatsPeriod.DAY) {
-                            (summary.focusSeconds / 60f / goal.coerceAtLeast(1)).coerceIn(0f, 1f)
-                        } else {
-                            (averageMinutes / goal.coerceAtLeast(1)).coerceIn(0f, 1f)
-                        }
+                }
+                Spacer(Modifier.height(14.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Metric("土豆", "${summary.tomatoCount}", "颗", Modifier.weight(1f))
+                    Metric("自由专注", "${summary.openCount}", "次", Modifier.weight(1f))
+                    Metric("完成率", "${(summary.completionRate * 100).toInt()}", "%", Modifier.weight(1f))
+                }
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        if (period == StatsPeriod.DAY) "每日目标 $goal 分钟" else "日均 $averageText",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.muted
+                    )
+                    Text(
+                        if (period == StatsPeriod.DAY) "${(summary.focusSeconds / 60)} / $goal" else "目标 $goal / 天",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.muted
                     )
                 }
-            }
-        }
-
-        if (period != StatsPeriod.DAY) {
-            item {
-                PotatoCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(20.dp)) {
-                        SectionLabel(
-                            "专注趋势",
-                            trailing = "${TimeFormat.shortDate(periodStart)} - ${TimeFormat.shortDate(now)}"
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "虚线为每日目标 $goal 分钟",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = palette.muted
-                        )
-                        Spacer(Modifier.height(14.dp))
-                        StatBarChart(
-                            days = days,
-                            goalMinutes = goal,
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                Spacer(Modifier.height(7.dp))
+                GoalBar(
+                    progress = if (period == StatsPeriod.DAY) {
+                        (summary.focusSeconds / 60f / goal.coerceAtLeast(1)).coerceIn(0f, 1f)
+                    } else {
+                        (averageMinutes / goal.coerceAtLeast(1)).coerceIn(0f, 1f)
                     }
-                }
+                )
             }
         }
-
-        if (summary.tagSlices.isNotEmpty()) {
-            item {
-                PotatoCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(20.dp)) {
-                        SectionLabel("时间花在哪")
-                        Spacer(Modifier.height(14.dp))
-                        summary.tagSlices.take(5).forEach { slice ->
-                            val percent = if (summary.focusSeconds == 0L) 0
-                            else ((slice.focusSeconds.toFloat() / summary.focusSeconds) * 100).toInt()
-                            val tagColor = tagColor(slice.tag)
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = slice.tag,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = palette.ink,
-                                    modifier = Modifier.width(64.dp),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(8.dp)
-                                        .clip(CircleShape)
-                                        .background(palette.line)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth(percent / 100f)
-                                            .height(8.dp)
-                                            .clip(CircleShape)
-                                            .background(tagColor)
-                                    )
-                                }
-                                Spacer(Modifier.width(12.dp))
-                                Text(
-                                    "$percent%",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = palette.muted,
-                                    modifier = Modifier.width(34.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        val allRecords = periodSessions.filter {
-            it.isFocus &&
-                it.status != SessionStatus.RUNNING &&
-                it.status != SessionStatus.DISCARDED
-        }
-        val initialLimit = if (period == StatsPeriod.DAY) 20 else 8
-        val records = if (showAllRecords) allRecords else allRecords.take(initialLimit)
-
-        item {
-            SectionLabel(
-                text = "记录明细",
-                trailing = if (allRecords.isNotEmpty()) "共 ${allRecords.size} 条" else null
-            )
-        }
-
-        if (!loaded) {
-            item { EmptyHint("正在读取记录…") }
-        } else if (records.isEmpty()) {
-            item {
-                PotatoCard(Modifier.fillMaxWidth()) {
-                    EmptyHint(
-                        "这里还空着。完成第一颗土豆或一次正计时，记录会自动出现在这里。",
-                        Modifier.padding(horizontal = 16.dp)
-                    )
-                }
-            }
-        } else {
-            items(records, key = { it.id }) { session ->
-                SessionRow(session)
-            }
-            if (allRecords.size > initialLimit) {
-                item {
-                    TextButton(
-                        onClick = { showAllRecords = !showAllRecords },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            if (showAllRecords) "收起记录" else "查看全部 ${allRecords.size} 条",
-                            color = palette.focus
-                        )
-                    }
-                }
-            }
-        }
-
-        item { Spacer(Modifier.height(24.dp)) }
     }
+
+    val trendBlock: @Composable () -> Unit = {
+        PotatoCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(20.dp)) {
+                SectionLabel(
+                    "专注趋势",
+                    trailing = "${TimeFormat.shortDate(periodStart)} - ${TimeFormat.shortDate(now)}"
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "虚线为每日目标 $goal 分钟",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = palette.muted
+                )
+                Spacer(Modifier.height(14.dp))
+                StatBarChart(
+                    days = days,
+                    goalMinutes = goal,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+
+    val tagsBlock: @Composable () -> Unit = {
+        PotatoCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(20.dp)) {
+                SectionLabel("时间花在哪")
+                Spacer(Modifier.height(14.dp))
+                summary.tagSlices.take(5).forEach { slice ->
+                    val percent = if (summary.focusSeconds == 0L) 0
+                    else ((slice.focusSeconds.toFloat() / summary.focusSeconds) * 100).toInt()
+                    val tagColor = tagColor(slice.tag)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = slice.tag,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = palette.ink,
+                            modifier = Modifier.width(64.dp),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(8.dp)
+                                .clip(CircleShape)
+                                .background(palette.line)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(percent / 100f)
+                                    .height(8.dp)
+                                    .clip(CircleShape)
+                                    .background(tagColor)
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "$percent%",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = palette.muted,
+                            modifier = Modifier.width(34.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    val allRecords = periodSessions.filter {
+        it.isFocus &&
+            it.status != SessionStatus.RUNNING &&
+            it.status != SessionStatus.DISCARDED
+    }
+    val initialLimit = if (period == StatsPeriod.DAY) 20 else 8
+    val records = if (showAllRecords) allRecords else allRecords.take(initialLimit)
+
+    val recordsHeaderBlock: @Composable () -> Unit = {
+        SectionLabel(
+            text = "记录明细",
+            trailing = if (allRecords.isNotEmpty()) "共 ${allRecords.size} 条" else null
+        )
+    }
+
+    val recordsFooterBlock: @Composable () -> Unit = {
+        if (allRecords.size > initialLimit) {
+            TextButton(
+                onClick = { showAllRecords = !showAllRecords },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    if (showAllRecords) "收起记录" else "查看全部 ${allRecords.size} 条",
+                    color = palette.focus
+                )
+            }
+        }
+    }
+
+    if (isWide) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState())
+                    .padding(end = 16.dp)
+            ) {
+                headerBlock()
+                Spacer(Modifier.height(14.dp))
+                summaryBlock()
+                if (period != StatsPeriod.DAY) {
+                    Spacer(Modifier.height(14.dp))
+                    trendBlock()
+                }
+                Spacer(Modifier.height(24.dp))
+            }
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 16.dp)
+            ) {
+                Spacer(Modifier.height(12.dp))
+                if (summary.tagSlices.isNotEmpty()) {
+                    tagsBlock()
+                    Spacer(Modifier.height(14.dp))
+                }
+                recordsHeaderBlock()
+                Spacer(Modifier.height(10.dp))
+                when {
+                    !loaded -> EmptyHint("正在读取记录…")
+                    records.isEmpty() -> PotatoCard(Modifier.fillMaxWidth()) {
+                        EmptyHint(
+                            "这里还空着。完成第一颗土豆或一次正计时，记录会自动出现在这里。",
+                            Modifier.padding(horizontal = 16.dp)
+                        )
+                    }
+                    else -> {
+                        records.forEach { session ->
+                            SessionRow(session)
+                            Spacer(Modifier.height(12.dp))
+                        }
+                        recordsFooterBlock()
+                    }
+                }
+                Spacer(Modifier.height(24.dp))
+            }
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            item { headerBlock() }
+
+            item { summaryBlock() }
+
+            if (period != StatsPeriod.DAY) {
+                item { trendBlock() }
+            }
+
+            if (summary.tagSlices.isNotEmpty()) {
+                item { tagsBlock() }
+            }
+
+            item { recordsHeaderBlock() }
+
+            if (!loaded) {
+                item { EmptyHint("正在读取记录…") }
+            } else if (records.isEmpty()) {
+                item {
+                    PotatoCard(Modifier.fillMaxWidth()) {
+                        EmptyHint(
+                            "这里还空着。完成第一颗土豆或一次正计时，记录会自动出现在这里。",
+                            Modifier.padding(horizontal = 16.dp)
+                        )
+                    }
+                }
+            } else {
+                items(records, key = { it.id }) { session ->
+                    SessionRow(session)
+                }
+                item { recordsFooterBlock() }
+            }
+
+            item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+
 }
 
 @Composable

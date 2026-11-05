@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -121,9 +122,20 @@ fun FocusScreen(
     val context = LocalContext.current
     val app = context.applicationContext as PotatoApp
     val palette = Potato.palette
-    val compactLayout = LocalConfiguration.current.screenHeightDp < 820
-    val ringSize = if (compactLayout) 248.dp else 292.dp
-    val ringAreaHeight = if (compactLayout) 266.dp else 310.dp
+    val configuration = LocalConfiguration.current
+    val isWide = configuration.screenWidthDp >= 600
+    val compactLayout = configuration.screenHeightDp < 820
+    val ringSize = when {
+        isWide && configuration.screenHeightDp < 480 -> 172.dp
+        isWide -> 260.dp
+        compactLayout -> 248.dp
+        else -> 292.dp
+    }
+    val ringAreaHeight = if (isWide && configuration.screenHeightDp < 480) {
+        ringSize + 12.dp
+    } else {
+        ringSize + 18.dp
+    }
     val haptics = LocalHapticFeedback.current
     val store = remember { TimerStore(context) }
     val controller = remember { TimerController(context) }
@@ -288,12 +300,7 @@ fun FocusScreen(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp)
-    ) {
+    val headerBlock: @Composable () -> Unit = {
         Spacer(Modifier.height(12.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -315,8 +322,9 @@ fun FocusScreen(
             }
             PotatoMark(size = 38.dp)
         }
+    }
 
-        Spacer(Modifier.height(18.dp))
+    val modeBlock: @Composable () -> Unit = {
         if (isHabit) {
             Row(
                 modifier = Modifier
@@ -341,8 +349,9 @@ fun FocusScreen(
                 }
             )
         }
+    }
 
-        Spacer(Modifier.height(18.dp))
+    val taskBlock: @Composable () -> Unit = {
         PotatoCard(
             modifier = Modifier
                 .fillMaxWidth()
@@ -382,8 +391,9 @@ fun FocusScreen(
                 }
             }
         }
+    }
 
-        Spacer(Modifier.height(8.dp))
+    val bannerBlock: @Composable () -> Unit = {
         AnimatedVisibility(
             visible = showCompletionBanner,
             enter = fadeIn() + slideInVertically { -it / 2 },
@@ -400,8 +410,10 @@ fun FocusScreen(
                     .padding(horizontal = 16.dp, vertical = 10.dp)
             )
         }
+    }
 
-        Spacer(Modifier.height(10.dp))
+    val ringBlock: @Composable () -> Unit = {
+        Spacer(Modifier.height(if (isWide) 6.dp else 10.dp))
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -417,72 +429,72 @@ fun FocusScreen(
                 modifier = Modifier.size(ringSize)
             )
         }
-
-        if (isHabit) {
-            Text(
+        when {
+            isHabit -> Text(
                 text = "本次 ${snapshot.plannedSeconds / 60} 分钟 · 完成后自动打卡",
                 style = MaterialTheme.typography.labelMedium,
                 color = palette.muted,
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
-        } else if (!isStopwatch && !isBreak) {
-            if (isActive) {
+            isActive && !isStopwatch && !isBreak -> Text(
+                text = "本次 ${snapshot.focusMin} 分钟 · 每 ${selectedPreset?.longBreakEvery ?: 4} 颗长休",
+                style = MaterialTheme.typography.labelMedium,
+                color = palette.muted,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+        }
+    }
+
+    val durationBlock: @Composable () -> Unit = {
+        if (!isActive && !isHabit && !isStopwatch && !isBreak) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    DurationStepButton("−") {
+                        val next = (effectiveFocusMin - 5).coerceAtLeast(1)
+                        focusOverride = next.takeIf { it != selectedPreset?.focusMin }
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    }
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "$effectiveFocusMin 分钟",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = palette.ink
+                        )
+                        Text(
+                            text = "本次专注时长",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = palette.muted
+                        )
+                    }
+                    DurationStepButton("+") {
+                        val next = (effectiveFocusMin + 5).coerceAtMost(180)
+                        focusOverride = next.takeIf { it != selectedPreset?.focusMin }
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "本次 ${snapshot.focusMin} 分钟 · 每 ${selectedPreset?.longBreakEvery ?: 4} 颗长休",
+                    text = "${selectedPreset?.name ?: "经典 25/5"} · 每 ${selectedPreset?.longBreakEvery ?: 4} 颗长休  ›",
                     style = MaterialTheme.typography.labelMedium,
                     color = palette.muted,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable { showPresetSheet = true }
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
                 )
-            } else {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        DurationStepButton("−") {
-                            val next = (effectiveFocusMin - 5).coerceAtLeast(1)
-                            focusOverride = next.takeIf { it != selectedPreset?.focusMin }
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        }
-                        Column(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = "$effectiveFocusMin 分钟",
-                                style = MaterialTheme.typography.titleLarge,
-                                color = palette.ink
-                            )
-                            Text(
-                                text = "本次专注时长",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = palette.muted
-                            )
-                        }
-                        DurationStepButton("+") {
-                            val next = (effectiveFocusMin + 5).coerceAtMost(180)
-                            focusOverride = next.takeIf { it != selectedPreset?.focusMin }
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "${selectedPreset?.name ?: "经典 25/5"} · 每 ${selectedPreset?.longBreakEvery ?: 4} 颗长休  ›",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = palette.muted,
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .clickable { showPresetSheet = true }
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                    )
-                }
             }
-        } else {
-            Spacer(Modifier.height(6.dp))
         }
+    }
 
+    val actionBlock: @Composable () -> Unit = {
         Spacer(Modifier.height(18.dp))
         Button(
             onClick = {
@@ -551,7 +563,9 @@ fun FocusScreen(
                 }
             }
         }
+    }
 
+    val dailyBlock: @Composable () -> Unit = {
         Spacer(Modifier.height(14.dp))
         PotatoCard(
             modifier = Modifier
@@ -609,6 +623,63 @@ fun FocusScreen(
                     )
                 }
             }
+        }
+    }
+
+    if (isWide) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState())
+                    .padding(end = 16.dp)
+            ) {
+                headerBlock()
+                Spacer(Modifier.height(6.dp))
+                taskBlock()
+                Spacer(Modifier.height(4.dp))
+                bannerBlock()
+                ringBlock()
+            }
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 16.dp)
+            ) {
+                Spacer(Modifier.height(12.dp))
+                modeBlock()
+                Spacer(Modifier.height(10.dp))
+                durationBlock()
+                actionBlock()
+                dailyBlock()
+                Spacer(Modifier.height(16.dp))
+            }
+        }
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp)
+        ) {
+            headerBlock()
+            Spacer(Modifier.height(18.dp))
+            modeBlock()
+            Spacer(Modifier.height(18.dp))
+            taskBlock()
+            Spacer(Modifier.height(8.dp))
+            bannerBlock()
+            ringBlock()
+            durationBlock()
+            actionBlock()
+            dailyBlock()
         }
     }
 
@@ -934,6 +1005,7 @@ private fun TaskSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = palette.surface,
+        sheetMaxWidth = 680.dp,
         dragHandle = {
             Box(
                 Modifier
@@ -1160,6 +1232,7 @@ private fun PresetSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = palette.surface,
+        sheetMaxWidth = 680.dp,
         dragHandle = {
             Box(
                 Modifier
