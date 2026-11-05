@@ -87,6 +87,31 @@ class HabitStatsTest {
     }
 
     @Test
+    fun bestStreakKeepsLongestCompletedRun() {
+        val logs = listOf(
+            log(today.minusDays(1), HabitLogStatus.COMPLETED),
+            log(today.minusDays(2), HabitLogStatus.COMPLETED),
+            log(today.minusDays(4), HabitLogStatus.SKIPPED),
+            log(today.minusDays(6), HabitLogStatus.COMPLETED),
+            log(today.minusDays(7), HabitLogStatus.COMPLETED),
+            log(today.minusDays(8), HabitLogStatus.COMPLETED)
+        ).associateBy { LocalDate.parse(it.date) }
+        assertEquals(3, HabitStats.bestStreak(habit(), logs, today))
+        assertEquals(2, HabitStats.streak(habit(), logs, today))
+    }
+
+    @Test
+    fun missedDayBreaksBestStreak() {
+        val logs = listOf(
+            log(today.minusDays(1), HabitLogStatus.COMPLETED),
+            log(today.minusDays(2), HabitLogStatus.COMPLETED),
+            log(today.minusDays(4), HabitLogStatus.COMPLETED),
+            log(today.minusDays(5), HabitLogStatus.COMPLETED)
+        ).associateBy { LocalDate.parse(it.date) }
+        assertEquals(2, HabitStats.bestStreak(habit(), logs, today))
+    }
+
+    @Test
     fun completionRateUsesScheduledDaysInWindow() {
         val logs = listOf(
             log(today, HabitLogStatus.COMPLETED),

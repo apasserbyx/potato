@@ -146,6 +146,8 @@ fun HabitsScreen(
     var pendingStartHabit by remember { mutableStateOf<Habit?>(null) }
     var menuHabitId by remember { mutableLongStateOf(-1L) }
     var blockedByActiveTimer by remember { mutableStateOf(false) }
+    var detailHabitId by remember { mutableStateOf<Long?>(null) }
+    var detailLogs by remember { mutableStateOf<List<HabitLog>>(emptyList()) }
 
     fun reload() {
         habits = app.habits.activeHabits()
@@ -160,6 +162,13 @@ fun HabitsScreen(
     LaunchedEffect(Unit) {
         HabitEvents.version.collect { reload() }
     }
+
+    LaunchedEffect(detailHabitId, recentLogs) {
+        val id = detailHabitId
+        detailLogs = if (id == null) emptyList() else app.habitLogs.logsForHabit(id)
+    }
+
+    val detailHabit = detailHabitId?.let { id -> habits.firstOrNull { it.id == id } }
 
     val logsByHabit = remember(recentLogs) { HabitStats.logsByHabit(recentLogs) }
     val scheduled = habits.filter { it.isScheduledOn(today) }
@@ -413,7 +422,8 @@ fun HabitsScreen(
                         reload()
                         onChanged()
                     },
-                    onEdit = { editingHabit = habit }
+                    onEdit = { editingHabit = habit },
+                    onOpenDetail = { detailHabitId = habit.id }
                 )
             }
         }
@@ -433,6 +443,30 @@ fun HabitsScreen(
         }
 
         item { Spacer(Modifier.height(24.dp)) }
+    }
+
+    detailHabit?.let { habit ->
+        HabitDetailSheet(
+            habit = habit,
+            logs = detailLogs,
+            today = today,
+            reminderText = habitReminderText(habit, app.settings),
+            onDismiss = { detailHabitId = null },
+            onEdit = {
+                detailHabitId = null
+                editingHabit = habit
+            },
+            onSkipToday = {
+                app.habitLogs.markSkipped(habit.id, today)
+                detailLogs = app.habitLogs.logsForHabit(habit.id)
+                reload()
+                onChanged()
+            },
+            onArchive = {
+                detailHabitId = null
+                pendingArchive = habit
+            }
+        )
     }
 
     editingHabit?.let { habit ->
@@ -521,7 +555,8 @@ private fun HabitCard(
     onDecrement: () -> Unit,
     onManualComplete: () -> Unit,
     onSkip: () -> Unit,
-    onEdit: () -> Unit
+    onEdit: () -> Unit,
+    onOpenDetail: () -> Unit
 ) {
     val palette = Potato.palette
     val accent = habitColor(habit.color)
@@ -540,6 +575,7 @@ private fun HabitCard(
         modifier = Modifier
             .fillMaxWidth()
             .alpha(if (completed || skipped) 0.62f else 1f)
+            .clickable(onClick = onOpenDetail)
     ) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -621,6 +657,13 @@ private fun HabitCard(
                                 )
                             }
                         }
+                        DropdownMenuItem(
+                            text = { Text("习惯详情") },
+                            onClick = {
+                                onMenuDismiss()
+                                onOpenDetail()
+                            }
+                        )
                         DropdownMenuItem(
                             text = { Text("编辑习惯") },
                             onClick = {
@@ -1518,3 +1561,20 @@ private fun newHabitDraft(sortOrder: Int): Habit = Habit(
 
 private fun formatSlotTime(minutesOfDay: Int): String =
     String.format(Locale.US, "%02d:%02d", minutesOfDay / 60, minutesOfDay % 60)
+
+private fun habitReminderText(habit: Habit, settings: SettingsStore): String = when {
+    !habit.reminderEnabled -> "提醒已关闭"
+    habit.reminderMode == HabitReminderMode.INDEPENDENT &&
+        habit.reminderMinutes in 0..(24 * 60 - 1) ->
+        "每天 ${formatSlotTime(habit.reminderMinutes)} 提醒"
+    habit.reminderSlot != HabitReminderSlot.NONE -> {
+        val title = when (habit.reminderSlot) {
+            HabitReminderSlot.MORNING -> "早上"
+            HabitReminderSlot.AFTERNOON -> "下午"
+            HabitReminderSlot.EVENING -> "晚上"
+            HabitReminderSlot.NONE -> ""
+        }
+        "$title ${formatSlotTime(settings.habitSlotMinutes(habit.reminderSlot))} 汇总提醒"
+    }
+    else -> "不提醒"
+}
