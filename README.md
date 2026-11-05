@@ -4,7 +4,7 @@
 
 番茄钟 + 正计时 + 习惯打卡 + 时间记录，本地优先，无需账号。
 
-[下载最新测试版 APK](https://github.com/apasserbyx/potato/releases/latest) ·
+[下载测试版 APK](https://github.com/apasserbyx/potato/releases) ·
 [习惯模块设计](docs/HABITS.md) ·
 [改进计划](docs/IMPROVEMENT_PLAN.md) ·
 [产品设计](docs/DESIGN.md)
