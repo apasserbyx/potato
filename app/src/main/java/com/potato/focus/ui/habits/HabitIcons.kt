@@ -69,6 +69,10 @@ val habitEmojis = listOf("📖", "🧘", "🏃", "✍️", "💧", "🌱", "🎯
 fun builtInHabitIcon(key: String): ImageVector? =
     builtInHabitIcons.firstOrNull { it.key == key }?.image
 
+fun habitColor(hex: String): Color =
+    runCatching { Color(android.graphics.Color.parseColor(hex)) }
+        .getOrDefault(Color(0xFF96592F))
+
 @Composable
 fun HabitIconVisual(
     iconType: HabitIconType,

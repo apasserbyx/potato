@@ -15,6 +15,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -80,9 +81,15 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.potato.focus.PotatoApp
 import com.potato.focus.data.FocusSession
+import com.potato.focus.data.Habit
+import com.potato.focus.data.HabitLog
+import com.potato.focus.data.HabitStats
+import com.potato.focus.data.HabitType
 import com.potato.focus.data.Preset
 import com.potato.focus.data.StatsCalculator
 import com.potato.focus.data.TaskItem
+import com.potato.focus.data.isScheduledOn
+import com.potato.focus.habits.HabitEvents
 import com.potato.focus.timer.StopResult
 import com.potato.focus.timer.TimerController
 import com.potato.focus.timer.TimerMath
@@ -96,6 +103,8 @@ import com.potato.focus.ui.components.PotatoCard
 import com.potato.focus.ui.components.PotatoMark
 import com.potato.focus.ui.components.TagPill
 import com.potato.focus.ui.components.TimerRing
+import com.potato.focus.ui.habits.HabitIconVisual
+import com.potato.focus.ui.habits.habitColor
 import com.potato.focus.ui.theme.Potato
 import com.potato.focus.util.TimeFormat
 import kotlinx.coroutines.delay
@@ -118,6 +127,8 @@ fun FocusScreen(
 
     var presets by remember { mutableStateOf<List<Preset>>(emptyList()) }
     var tasks by remember { mutableStateOf<List<TaskItem>>(emptyList()) }
+    var habits by remember { mutableStateOf<List<Habit>>(emptyList()) }
+    var habitLogs by remember { mutableStateOf<Map<Long, HabitLog>>(emptyMap()) }
     var todaySessions by remember { mutableStateOf<List<FocusSession>>(emptyList()) }
     var selectedPresetId by remember { mutableLongStateOf(settings.selectedPresetId) }
     var selectedTaskId by remember { mutableLongStateOf(settings.selectedTaskId) }
@@ -137,6 +148,11 @@ fun FocusScreen(
         presets = app.presets.all()
         tasks = app.tasks.activeTasks()
         todaySessions = app.sessions.sessionsSince(TimeFormat.startOfToday())
+        val today = TimeFormat.localDate(System.currentTimeMillis())
+        habits = app.habits.activeHabits()
+            .filter { it.isScheduledOn(today) }
+            .sortedWith(compareBy({ it.reminderMinutes }, { it.sortOrder }))
+        habitLogs = app.habitLogs.logsForDate(today)
     }
 
     LaunchedEffect(Unit) {
@@ -148,6 +164,10 @@ fun FocusScreen(
                 settings.selectedPresetId = default.id
             }
         }
+    }
+
+    LaunchedEffect(Unit) {
+        HabitEvents.version.collect { reloadData() }
     }
 
     LaunchedEffect(snapshot.phase, snapshot.status) {
@@ -164,6 +184,11 @@ fun FocusScreen(
         }
         todaySessions = app.sessions.sessionsSince(TimeFormat.startOfToday())
         tasks = app.tasks.activeTasks()
+        val today = TimeFormat.localDate(System.currentTimeMillis())
+        habits = app.habits.activeHabits()
+            .filter { it.isScheduledOn(today) }
+            .sortedWith(compareBy({ it.reminderMinutes }, { it.sortOrder }))
+        habitLogs = app.habitLogs.logsForDate(today)
     }
 
     val selectedPreset = presets.firstOrNull { it.id == selectedPresetId }
@@ -586,6 +611,8 @@ fun FocusScreen(
     if (showTaskSheet) {
         TaskSheet(
             tasks = tasks,
+            habits = habits,
+            habitLogs = habitLogs,
             selectedTaskId = selectedTaskId,
             onDismiss = { showTaskSheet = false },
             onSelect = { task ->
@@ -612,6 +639,26 @@ fun FocusScreen(
                     settings.selectTask(null)
                 }
                 tasks = app.tasks.activeTasks()
+            },
+            onStartHabit = { habit ->
+                val log = habitLogs[habit.id]
+                val remaining = HabitStats.remainingSeconds(habit, log)
+                if (controller.startHabit(habit, remaining)) {
+                    showTaskSheet = false
+                    onChanged()
+                }
+            },
+            onIncrementHabit = { habit ->
+                val today = TimeFormat.localDate(System.currentTimeMillis())
+                app.habitLogs.adjustCount(habit.id, today, 1, habit.targetCount)
+                habitLogs = app.habitLogs.logsForDate(today)
+                onChanged()
+            },
+            onCompleteHabit = { habit ->
+                val today = TimeFormat.localDate(System.currentTimeMillis())
+                app.habitLogs.markCompleted(habit.id, today)
+                habitLogs = app.habitLogs.logsForDate(today)
+                onChanged()
             }
         )
     }
@@ -717,21 +764,159 @@ private fun DurationStepButton(text: String, onClick: () -> Unit) {
     }
 }
 
+@Composable
+private fun TaskSheetTab(text: String, selected: Boolean, onClick: () -> Unit) {
+    val palette = Potato.palette
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        color = if (selected) palette.surface else palette.muted,
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(if (selected) palette.ink else palette.surfaceRaised)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 8.dp)
+    )
+}
+
+@Composable
+private fun HabitPickerContent(
+    habits: List<Habit>,
+    habitLogs: Map<Long, HabitLog>,
+    onStartHabit: (Habit) -> Unit,
+    onIncrementHabit: (Habit) -> Unit,
+    onCompleteHabit: (Habit) -> Unit
+) {
+    val palette = Potato.palette
+    val sorted = habits.sortedWith(
+        compareBy({ HabitStats.isCompleted(habitLogs[it.id]) }, { it.sortOrder })
+    )
+    if (sorted.isEmpty()) {
+        Text(
+            "今天没有安排习惯。可以在「习惯」页添加。",
+            style = MaterialTheme.typography.bodyMedium,
+            color = palette.muted,
+            modifier = Modifier.padding(vertical = 20.dp)
+        )
+        return
+    }
+    Text(
+        "今日习惯",
+        style = MaterialTheme.typography.labelMedium,
+        color = palette.muted
+    )
+    Spacer(Modifier.height(6.dp))
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 360.dp)
+    ) {
+        items(sorted, key = { it.id }) { habit ->
+            val log = habitLogs[habit.id]
+            val completed = HabitStats.isCompleted(log)
+            val skipped = HabitStats.isSkipped(log)
+            val accent = habitColor(habit.color)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                HabitIconVisual(
+                    iconType = habit.iconType,
+                    icon = habit.icon,
+                    imagePath = habit.iconImagePath,
+                    contentDescription = habit.name,
+                    size = 38.dp,
+                    background = accent.copy(alpha = 0.14f),
+                    tint = accent
+                )
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = habit.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = palette.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = when {
+                            completed -> "已完成"
+                            skipped -> "今天休息"
+                            else -> HabitStats.progressText(habit, log)
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (completed) palette.breakColor else palette.muted
+                    )
+                }
+                when {
+                    completed -> Icon(
+                        Icons.Rounded.Check,
+                        contentDescription = "已完成",
+                        tint = palette.breakColor,
+                        modifier = Modifier.size(19.dp)
+                    )
+                    skipped -> Text(
+                        "已跳过",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.muted
+                    )
+                    else -> {
+                        if (habit.type == HabitType.COUNT) {
+                            TextButton(onClick = { onIncrementHabit(habit) }) {
+                                Text("+1", color = accent)
+                            }
+                        } else {
+                            Button(
+                                onClick = { onStartHabit(habit) },
+                                shape = CircleShape,
+                                modifier = Modifier.height(34.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = accent,
+                                    contentColor = palette.surface
+                                )
+                            ) {
+                                Text("开始", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                        IconButton(onClick = { onCompleteHabit(habit) }) {
+                            Icon(
+                                Icons.Rounded.Check,
+                                contentDescription = "标记完成",
+                                tint = palette.muted,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TaskSheet(
     tasks: List<TaskItem>,
+    habits: List<Habit>,
+    habitLogs: Map<Long, HabitLog>,
     selectedTaskId: Long,
     onDismiss: () -> Unit,
     onSelect: (TaskItem?) -> Unit,
     onAdd: (String, Int, String) -> Unit,
     onComplete: (TaskItem) -> Unit,
-    onDelete: (TaskItem) -> Unit
+    onDelete: (TaskItem) -> Unit,
+    onStartHabit: (Habit) -> Unit,
+    onIncrementHabit: (Habit) -> Unit,
+    onCompleteHabit: (Habit) -> Unit
 ) {
     val palette = Potato.palette
     var newTitle by remember { mutableStateOf("") }
     var estimate by remember { mutableStateOf(1) }
     var tag by remember { mutableStateOf("工作") }
+    var tab by remember { mutableStateOf(0) }
     var deletingTask by remember { mutableStateOf<TaskItem?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val addTask = {
@@ -763,7 +948,13 @@ private fun TaskSheet(
                 .padding(horizontal = 24.dp)
         ) {
             Text("今天想专注做什么？", style = MaterialTheme.typography.headlineMedium, color = palette.ink)
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TaskSheetTab("任务", tab == 0) { tab = 0 }
+                TaskSheetTab("习惯", tab == 1) { tab = 1 }
+            }
+            Spacer(Modifier.height(12.dp))
+            if (tab == 0) {
             OutlinedTextField(
                 value = newTitle,
                 onValueChange = { newTitle = it },
@@ -910,6 +1101,15 @@ private fun TaskSheet(
                     style = MaterialTheme.typography.bodyMedium,
                     color = palette.muted,
                     modifier = Modifier.padding(vertical = 20.dp)
+                )
+            }
+            } else {
+                HabitPickerContent(
+                    habits = habits,
+                    habitLogs = habitLogs,
+                    onStartHabit = onStartHabit,
+                    onIncrementHabit = onIncrementHabit,
+                    onCompleteHabit = onCompleteHabit
                 )
             }
             Spacer(Modifier.height(12.dp))

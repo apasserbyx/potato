@@ -37,7 +37,7 @@ object HabitSounds {
     fun resolveUri(context: Context, key: String): Uri? {
         when {
             key.isBlank() || key == "default" -> {
-                return Settings.System.DEFAULT_NOTIFICATION_URI
+                return Settings.System.DEFAULT_NOTIFICATION_URI ?: fallbackUri(context)
             }
             key.startsWith("system:") -> {
                 return runCatching { Uri.parse(key.removePrefix("system:")) }.getOrNull()
@@ -49,6 +49,9 @@ object HabitSounds {
             }
         }
     }
+
+    fun fallbackUri(context: Context): Uri =
+        Uri.parse("android.resource://${context.packageName}/${R.raw.habit_chime}")
 
     fun channelPart(key: String): String = when {
         key.isBlank() -> "global"

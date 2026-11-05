@@ -8,6 +8,7 @@ import com.potato.focus.data.PresetDao
 import com.potato.focus.data.SessionDao
 import com.potato.focus.data.SettingsStore
 import com.potato.focus.data.TaskDao
+import com.potato.focus.habits.HabitNotificationChannels
 import com.potato.focus.habits.HabitReminderScheduler
 import com.potato.focus.habits.HabitSnoozeScheduler
 import com.potato.focus.timer.TimerNotifications
@@ -38,6 +39,7 @@ class PotatoApp : Application() {
         habitLogs = HabitLogDao(database)
         settings = SettingsStore(this)
         TimerNotifications.createChannels(this)
+        HabitNotificationChannels.cleanupLegacyChannels(this)
         HabitReminderScheduler.scheduleAll(this)
         HabitSnoozeScheduler.reschedulePersisted(this)
     }

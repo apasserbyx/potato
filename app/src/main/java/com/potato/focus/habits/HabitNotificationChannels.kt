@@ -25,7 +25,8 @@ object HabitNotificationChannels {
         level: HabitAlertLevel
     ): String {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return "habit_reminder"
-        val id = channelId(soundKey, level)
+        val generation = SettingsStore(context).habitChannelGeneration
+        val id = channelId(soundKey, level, generation)
         val manager = context.getSystemService(NotificationManager::class.java)
         if (manager.getNotificationChannel(id) != null) return id
 
@@ -51,15 +52,14 @@ object HabitNotificationChannels {
                 enableVibration(false)
             } else {
                 val uri = HabitSounds.resolveUri(context, soundKey)
-                if (uri != null) {
-                    setSound(
-                        uri,
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .build()
-                    )
-                }
+                    ?: HabitSounds.fallbackUri(context)
+                setSound(
+                    uri,
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 180, 100, 180)
             }
@@ -87,9 +87,30 @@ object HabitNotificationChannels {
         return ensureChannel(context, sound, level)
     }
 
+    fun repairChannel(context: Context): String {
+        val settings = SettingsStore(context)
+        settings.habitChannelGeneration = settings.habitChannelGeneration + 1
+        val (sound, level) = globalSettings(context)
+        return ensureChannel(context, sound, level)
+    }
+
+    fun cleanupLegacyChannels(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.notificationChannels
+            .filter {
+                it.id == "habit_reminder" || it.id.startsWith("habit_reminder_v2_")
+            }
+            .forEach { manager.deleteNotificationChannel(it.id) }
+    }
+
     fun status(context: Context): HabitChannelStatus {
         val (sound, level) = globalSettings(context)
-        val id = channelId(sound, level)
+        val id = channelId(
+            sound,
+            level,
+            SettingsStore(context).habitChannelGeneration
+        )
         val appEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             return HabitChannelStatus(appEnabled, true, true, id)
@@ -101,6 +122,10 @@ object HabitNotificationChannels {
         return HabitChannelStatus(appEnabled, channelEnabled, soundEnabled, id)
     }
 
-    private fun channelId(soundKey: String, level: HabitAlertLevel): String =
-        "habit_reminder_v2_${HabitSounds.channelPart(soundKey)}_${level.name.lowercase()}"
+    private fun channelId(
+        soundKey: String,
+        level: HabitAlertLevel,
+        generation: Int
+    ): String =
+        "habit_reminder_v3_${HabitSounds.channelPart(soundKey)}_${level.name.lowercase()}_g$generation"
 }

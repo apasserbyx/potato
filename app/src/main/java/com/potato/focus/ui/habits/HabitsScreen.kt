@@ -1420,9 +1420,5 @@ private fun newHabitDraft(sortOrder: Int): Habit = Habit(
     createdAt = System.currentTimeMillis()
 )
 
-private fun habitColor(hex: String): Color =
-    runCatching { Color(android.graphics.Color.parseColor(hex)) }
-        .getOrDefault(Color(0xFF96592F))
-
 private fun formatSlotTime(minutesOfDay: Int): String =
     String.format(Locale.US, "%02d:%02d", minutesOfDay / 60, minutesOfDay % 60)

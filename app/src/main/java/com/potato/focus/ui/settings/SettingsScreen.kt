@@ -594,22 +594,26 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
                             !habitChannelStatus.channelEnabled ->
                                 "当前声音/强度的通知渠道被系统关闭"
                             !habitChannelStatus.soundEnabled ->
-                                "提醒声音被系统关闭"
+                                "通知渠道声音被系统关闭，可尝试修复"
                             else -> "当前设置可以正常提醒"
                         },
                         trailing = when {
                             !habitChannelStatus.appNotificationsEnabled -> "去开启"
-                            !habitChannelStatus.channelEnabled ||
-                                !habitChannelStatus.soundEnabled -> "去设置"
+                            !habitChannelStatus.channelEnabled -> "去设置"
+                            !habitChannelStatus.soundEnabled -> "修复声音"
                             else -> "测试"
                         },
                         onClick = {
                             when {
                                 !habitChannelStatus.appNotificationsEnabled ->
                                     enableNotifications()
-                                !habitChannelStatus.channelEnabled ||
-                                    !habitChannelStatus.soundEnabled ->
+                                !habitChannelStatus.channelEnabled ->
                                     openHabitChannelSettings(habitChannelStatus.channelId)
+                                !habitChannelStatus.soundEnabled -> {
+                                    HabitNotificationChannels.repairChannel(context)
+                                    channelStatusVersion++
+                                    sendHabitTestReminder()
+                                }
                                 else -> sendHabitTestReminder()
                             }
                         }
