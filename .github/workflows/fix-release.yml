@@ -1,0 +1,36 @@
+name: Fix Release Metadata
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: contains(github.event.head_commit.message, '[fix-release]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update release title and notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release edit v1.0.0-build2 \
+            --title "Potato v1.0.0-build2 · Debug" \
+            --notes "$(cat <<'EOF'
+Potato Android 测试版。
+
+- 包名：`com.potato.focus`
+- 应用版本：1.0
+- 最低系统：Android 8.0
+- 构建：GitHub Actions Debug 构建
+- 该版本使用 GitHub Actions 生成的 Debug 签名，与本地 debug 包签名可能不同
+- 如果手机已安装本地 debug 包，覆盖安装可能失败；请先导出数据，卸载旧包后再安装
+- 该版本仅用于个人测试
+
+完整功能与构建说明见仓库 README。
+EOF
+)"

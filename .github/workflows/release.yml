@@ -44,7 +44,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          name: "Potato ${GITHUB_REF_NAME} · Debug"
+          name: "Potato ${{ github.ref_name }} · Debug"
           body: |
             Potato Android 测试版。
 
@@ -53,7 +53,9 @@ jobs:
             - 最低系统：Android 8.0
             - 构建：GitHub Actions Debug 构建
             - 安装前请确认已允许安装未知来源应用
-            - 该版本使用 Android Debug 签名，仅用于个人测试
+            - 该版本使用 GitHub Actions 生成的 Debug 签名，与本地 debug 包签名可能不同
+            - 如果手机已安装本地 debug 包，直接覆盖安装可能失败；请先导出数据，再卸载旧包安装
+            - 该版本仅用于个人测试
 
             完整功能与构建说明见仓库 README。
           files: release/Potato-*-debug.apk
