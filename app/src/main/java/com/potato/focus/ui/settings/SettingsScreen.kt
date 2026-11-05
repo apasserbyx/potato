@@ -128,6 +128,7 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
     var showHabitSoundPicker by remember { mutableStateOf(false) }
     var channelStatusVersion by remember { mutableIntStateOf(0) }
     var soundImportMessage by remember { mutableStateOf("") }
+    var appSoundFallback by remember { mutableStateOf(settings.habitAppSoundFallback) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -822,6 +823,40 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
                             if (dndAccess) openDndSettings() else openDndAccessSettings()
                         }
                     )
+                    DividerLine()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "App 补充播放",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = palette.ink
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                "OPPO / 一加等机型通知无声时，由 App 直接补播。会尊重静音、媒体音量和免打扰。",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = palette.muted
+                            )
+                        }
+                        Switch(
+                            checked = appSoundFallback,
+                            onCheckedChange = {
+                                appSoundFallback = it
+                                settings.habitAppSoundFallback = it
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = palette.focus,
+                                uncheckedThumbColor = palette.muted,
+                                uncheckedTrackColor = palette.line
+                            )
+                        )
+                    }
                     DividerLine()
                     SettingRow(
                         title = "App 内直接试听",

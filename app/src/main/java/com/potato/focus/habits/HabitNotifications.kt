@@ -56,6 +56,9 @@ object HabitNotifications {
             NotificationManagerCompat.from(context)
                 .notify(ID_SUMMARY_BASE + slot.ordinal, builder.build())
         }
+        if (settings.habitAppSoundFallback && level != HabitAlertLevel.GENTLE) {
+            HabitSounds.playReminder(context, settings.habitSoundKey)
+        }
     }
 
     fun postHabit(
@@ -102,6 +105,12 @@ object HabitNotifications {
         runCatching {
             NotificationManagerCompat.from(context)
                 .notify(notificationId(habit.id), builder.build())
+        }
+        if (settings.habitAppSoundFallback && level != HabitAlertLevel.GENTLE) {
+            HabitSounds.playReminder(
+                context,
+                habit.soundKey.ifBlank { settings.habitSoundKey }
+            )
         }
     }
 

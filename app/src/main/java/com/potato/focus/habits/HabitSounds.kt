@@ -66,6 +66,40 @@ object HabitSounds {
         else -> key.replace(Regex("[^a-zA-Z0-9_-]"), "_")
     }
 
+    fun playReminder(context: Context, key: String) {
+        if (key.isBlank()) return
+        val audioManager = context.getSystemService(android.media.AudioManager::class.java)
+        if (audioManager.ringerMode == android.media.AudioManager.RINGER_MODE_SILENT) return
+        if (audioManager.isStreamMute(android.media.AudioManager.STREAM_MUSIC)) return
+        if (audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) <= 0) return
+        val notificationManager =
+            context.getSystemService(android.app.NotificationManager::class.java)
+        if (notificationManager.isNotificationPolicyAccessGranted &&
+            notificationManager.currentInterruptionFilter !=
+            android.app.NotificationManager.INTERRUPTION_FILTER_ALL
+        ) {
+            return
+        }
+        stopPreview()
+        val option = builtInOptions.firstOrNull { it.key == key }
+        if (option?.rawRes != null) {
+            runCatching {
+                currentPlayer = MediaPlayer.create(context, option.rawRes).apply {
+                    setOnCompletionListener { stopPreview() }
+                    start()
+                }
+            }
+            return
+        }
+        val uri = resolveUri(context, key) ?: return
+        runCatching {
+            currentPlayer = MediaPlayer.create(context, uri)?.apply {
+                setOnCompletionListener { stopPreview() }
+                start()
+            }
+        }
+    }
+
     fun preview(context: Context, key: String) {
         stopPreview()
         val option = builtInOptions.firstOrNull { it.key == key }

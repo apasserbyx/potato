@@ -70,6 +70,13 @@ class SettingsStore(context: Context) {
         get() = prefs.getInt(KEY_HABIT_CHANNEL_GENERATION, 1)
         set(value) = prefs.edit().putInt(KEY_HABIT_CHANNEL_GENERATION, value).apply()
 
+    var habitAppSoundFallback: Boolean
+        get() = prefs.getBoolean(
+            KEY_HABIT_APP_SOUND_FALLBACK,
+            android.os.Build.MANUFACTURER.lowercase() in setOf("oppo", "oneplus", "realme")
+        )
+        set(value) = prefs.edit().putBoolean(KEY_HABIT_APP_SOUND_FALLBACK, value).apply()
+
     fun habitSlotMinutes(slot: HabitReminderSlot): Int = when (slot) {
         HabitReminderSlot.MORNING -> prefs.getInt(KEY_HABIT_MORNING, 8 * 60 + 30)
         HabitReminderSlot.AFTERNOON -> prefs.getInt(KEY_HABIT_AFTERNOON, 14 * 60)
@@ -135,5 +142,6 @@ class SettingsStore(context: Context) {
         private const val KEY_HABIT_ALERT_LEVEL = "habit_alert_level"
         private const val KEY_HABIT_FOLLOW_UP = "habit_follow_up_enabled"
         private const val KEY_HABIT_CHANNEL_GENERATION = "habit_channel_generation"
+        private const val KEY_HABIT_APP_SOUND_FALLBACK = "habit_app_sound_fallback"
     }
 }
