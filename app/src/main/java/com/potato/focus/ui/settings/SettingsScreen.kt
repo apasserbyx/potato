@@ -6,6 +6,7 @@ import android.app.AlarmManager
 import android.app.NotificationManager
 import android.app.TimePickerDialog
 import android.content.Intent
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.RingtoneManager
 import android.content.pm.PackageManager
@@ -309,6 +310,15 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
         }
     }
 
+    fun openBluetoothSettings() {
+        runCatching {
+            context.startActivity(
+                Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+    }
+
     fun openDndSettings() {
         runCatching {
             context.startActivity(
@@ -323,6 +333,12 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
     val notificationVolume = audioManager.getStreamVolume(AudioManager.STREAM_NOTIFICATION)
     val notificationMax = audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION)
     val notificationMuted = audioManager.isStreamMute(AudioManager.STREAM_NOTIFICATION)
+    val mediaVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+    val mediaMax = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+    val mediaMuted = audioManager.isStreamMute(AudioManager.STREAM_MUSIC)
+    val outputLabels = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        .mapNotNull { audioOutputLabel(it.type) }
+        .distinct()
     val ringerMode = audioManager.ringerMode
     val dndAccess = notificationManager.isNotificationPolicyAccessGranted
     val dndActive = dndAccess &&
@@ -759,6 +775,31 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
                     )
                     DividerLine()
                     SettingRow(
+                        title = "媒体音量",
+                        subtitle = if (mediaMuted || mediaVolume == 0) {
+                            "已静音或音量为 0，App 内试听也会无声"
+                        } else {
+                            "$mediaVolume / $mediaMax"
+                        },
+                        trailing = "打开",
+                        onClick = { openSoundSettings() }
+                    )
+                    DividerLine()
+                    SettingRow(
+                        title = "音频输出",
+                        subtitle = if (outputLabels.isEmpty()) {
+                            "未检测到输出设备"
+                        } else {
+                            outputLabels.joinToString(" / ") +
+                                if (outputLabels.any { it.contains("蓝牙") }) {
+                                    " · 当前有蓝牙输出，请检查蓝牙设备音量"
+                                } else ""
+                        },
+                        trailing = "蓝牙设置",
+                        onClick = { openBluetoothSettings() }
+                    )
+                    DividerLine()
+                    SettingRow(
                         title = "铃声模式",
                         subtitle = when (ringerMode) {
                             AudioManager.RINGER_MODE_SILENT -> "静音模式，通知声音会被关闭"
@@ -783,8 +824,18 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
                     )
                     DividerLine()
                     SettingRow(
-                        title = "内置声音测试",
-                        subtitle = "使用「土豆叮」测试，排查自定义铃声问题",
+                        title = "App 内直接试听",
+                        subtitle = "绕过通知渠道，直接用媒体音量播放「土豆叮」",
+                        trailing = "播放",
+                        onClick = {
+                            HabitSounds.stopPreview()
+                            HabitSounds.preview(context, "chime")
+                        }
+                    )
+                    DividerLine()
+                    SettingRow(
+                        title = "内置通知声音测试",
+                        subtitle = "通过通知渠道播放「土豆叮」，排查自定义铃声问题",
                         trailing = "播放",
                         onClick = { HabitNotifications.postTest(context, "chime") }
                     )
@@ -978,6 +1029,24 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
             }
         )
     }
+}
+
+private fun audioOutputLabel(type: Int): String? = when (type) {
+    AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "扬声器"
+    AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "听筒"
+    AudioDeviceInfo.TYPE_WIRED_HEADSET,
+    AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "有线耳机"
+    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+    AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+    AudioDeviceInfo.TYPE_BLE_HEADSET,
+    AudioDeviceInfo.TYPE_BLE_SPEAKER,
+    AudioDeviceInfo.TYPE_BLE_BROADCAST -> "蓝牙"
+    AudioDeviceInfo.TYPE_USB_HEADSET,
+    AudioDeviceInfo.TYPE_USB_DEVICE -> "USB"
+    AudioDeviceInfo.TYPE_HDMI,
+    AudioDeviceInfo.TYPE_HDMI_ARC,
+    AudioDeviceInfo.TYPE_HDMI_EARC -> "HDMI"
+    else -> null
 }
 
 @Composable
