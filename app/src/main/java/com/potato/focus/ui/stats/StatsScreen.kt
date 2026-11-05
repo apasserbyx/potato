@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.rounded.LocalFireDepartment
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -65,6 +67,7 @@ fun StatsScreen(refreshKey: Int) {
     var period by remember { mutableStateOf(StatsPeriod.WEEK) }
     var allSessions by remember { mutableStateOf<List<FocusSession>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
+    var showAllRecords by remember(period) { mutableStateOf(false) }
 
     LaunchedEffect(refreshKey, period) {
         allSessions = app.sessions.allSessions()
@@ -185,11 +188,11 @@ fun StatsScreen(refreshKey: Int) {
                     Spacer(Modifier.height(14.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(24.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Metric("土豆", "${summary.tomatoCount}", "颗")
-                        Metric("自由专注", "${summary.openCount}", "次")
-                        Metric("完成率", "${(summary.completionRate * 100).toInt()}", "%")
+                        Metric("土豆", "${summary.tomatoCount}", "颗", Modifier.weight(1f))
+                        Metric("自由专注", "${summary.openCount}", "次", Modifier.weight(1f))
+                        Metric("完成率", "${(summary.completionRate * 100).toInt()}", "%", Modifier.weight(1f))
                     }
                     Spacer(Modifier.height(16.dp))
                     Row(
@@ -223,8 +226,17 @@ fun StatsScreen(refreshKey: Int) {
             item {
                 PotatoCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(20.dp)) {
-                        SectionLabel("专注趋势")
-                        Spacer(Modifier.height(16.dp))
+                        SectionLabel(
+                            "专注趋势",
+                            trailing = "${TimeFormat.shortDate(periodStart)} - ${TimeFormat.shortDate(now)}"
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "虚线为每日目标 $goal 分钟",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = palette.muted
+                        )
+                        Spacer(Modifier.height(14.dp))
                         StatBarChart(
                             days = days,
                             goalMinutes = goal,
@@ -288,20 +300,21 @@ fun StatsScreen(refreshKey: Int) {
             }
         }
 
+        val allRecords = periodSessions.filter {
+            it.isFocus &&
+                it.status != SessionStatus.RUNNING &&
+                it.status != SessionStatus.DISCARDED
+        }
+        val initialLimit = if (period == StatsPeriod.DAY) 20 else 8
+        val records = if (showAllRecords) allRecords else allRecords.take(initialLimit)
+
         item {
             SectionLabel(
                 text = "记录明细",
-                trailing = if (periodSessions.any { it.isFocus }) "共 ${periodSessions.count { it.isFocus }} 条" else null
+                trailing = if (allRecords.isNotEmpty()) "共 ${allRecords.size} 条" else null
             )
         }
 
-        val records = periodSessions
-            .filter {
-                it.isFocus &&
-                    it.status != SessionStatus.RUNNING &&
-                    it.status != SessionStatus.DISCARDED
-            }
-            .take(if (period == StatsPeriod.DAY) 30 else 8)
         if (!loaded) {
             item { EmptyHint("正在读取记录…") }
         } else if (records.isEmpty()) {
@@ -317,6 +330,19 @@ fun StatsScreen(refreshKey: Int) {
             items(records, key = { it.id }) { session ->
                 SessionRow(session)
             }
+            if (allRecords.size > initialLimit) {
+                item {
+                    TextButton(
+                        onClick = { showAllRecords = !showAllRecords },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            if (showAllRecords) "收起记录" else "查看全部 ${allRecords.size} 条",
+                            color = palette.focus
+                        )
+                    }
+                }
+            }
         }
 
         item { Spacer(Modifier.height(24.dp)) }
@@ -324,16 +350,23 @@ fun StatsScreen(refreshKey: Int) {
 }
 
 @Composable
-private fun Metric(label: String, value: String, unit: String) {
+private fun Metric(
+    label: String,
+    value: String,
+    unit: String,
+    modifier: Modifier = Modifier
+) {
     val palette = Potato.palette
-    Column {
+    Column(modifier = modifier) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = palette.muted)
         Spacer(Modifier.height(3.dp))
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 value,
                 style = MaterialTheme.typography.headlineMedium,
-                color = palette.ink
+                color = palette.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.width(3.dp))
             Text(
@@ -389,7 +422,7 @@ private fun SessionRow(session: FocusSession) {
                     text = when {
                         isOpen -> "自"
                         isHabit -> "习"
-                        else -> "番"
+                        else -> "土"
                     },
                     style = MaterialTheme.typography.labelLarge,
                     color = badgeColor,
@@ -409,7 +442,7 @@ private fun SessionRow(session: FocusSession) {
                     )
                     if (session.tag.isNotBlank()) {
                         Spacer(Modifier.width(8.dp))
-                        TagPill(session.tag)
+                        TagPill(session.tag, Modifier.widthIn(max = 96.dp))
                     }
                 }
                 Spacer(Modifier.height(3.dp))
@@ -425,7 +458,9 @@ private fun SessionRow(session: FocusSession) {
                 text = TimeFormat.durationText(session.focusedSeconds.toLong()),
                 style = MaterialTheme.typography.labelLarge,
                 color = palette.ink,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                softWrap = false
             )
         }
     }

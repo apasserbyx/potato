@@ -251,7 +251,9 @@ fun TagPill(text: String, modifier: Modifier = Modifier) {
         modifier = modifier
             .clip(CircleShape)
             .background(color.copy(alpha = 0.12f))
-            .padding(horizontal = 8.dp, vertical = 3.dp)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
     )
 }
 
@@ -365,6 +367,13 @@ fun StatBarChart(
                 .then(
                     Modifier.drawWithContent {
                         drawContent()
+                        val baselineY = size.height - 0.5.dp.toPx()
+                        drawLine(
+                            color = palette.line.copy(alpha = 0.75f),
+                            start = Offset(0f, baselineY),
+                            end = Offset(size.width, baselineY),
+                            strokeWidth = 1.dp.toPx()
+                        )
                         val y = size.height * (1f - goalFraction)
                         drawLine(
                             color = palette.muted.copy(alpha = 0.30f),
@@ -394,44 +403,75 @@ fun StatBarChart(
                     ) {
                         Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .fillMaxHeight(if (hasData) fraction.coerceAtLeast(0.035f) else 0.018f)
-                                .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
-                                .background(
-                                    if (hasData) palette.focus.copy(alpha = if (day.tomatoCount > 0) 0.92f else 0.55f)
-                                    else palette.line
-                                )
+                                .width(1.dp)
+                                .height(3.dp)
+                                .background(palette.line.copy(alpha = 0.8f))
                         )
+                        if (hasData) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .fillMaxHeight(fraction.coerceAtLeast(0.035f))
+                                    .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
+                                    .background(
+                                        palette.focus.copy(
+                                            alpha = if (day.tomatoCount > 0) 0.92f else 0.55f
+                                        )
+                                    )
+                            )
+                        }
                     }
                 }
             }
         }
         if (showLabels) {
             Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(if (days.size > 14) 2.dp else 10.dp)
-            ) {
-                days.forEach { day ->
-                    Text(
-                        text = if (days.size > 14) {
-                            if (day.date.dayOfMonth % 5 == 1 || day == days.last()) {
-                                "${day.date.dayOfMonth}"
-                            } else ""
-                        } else {
-                            com.potato.focus.util.TimeFormat.weekdayShort(day.date)
-                        },
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = palette.muted,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        maxLines = 1,
-                        overflow = TextOverflow.Clip
-                    )
+            if (days.size <= 7) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    days.forEach { day ->
+                        Text(
+                            text = com.potato.focus.util.TimeFormat.weekdayShort(day.date),
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = palette.muted,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Clip
+                        )
+                    }
+                }
+            } else {
+                val labelIndices = monthLabelIndices(days.size)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    labelIndices.forEach { index ->
+                        val date = days[index].date
+                        Text(
+                            text = "${date.monthValue}/${date.dayOfMonth}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = palette.muted,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+private fun monthLabelIndices(size: Int): List<Int> {
+    if (size <= 1) return listOf(0)
+    val target = minOf(6, size)
+    return (0 until target)
+        .map { it * (size - 1) / (target - 1) }
+        .distinct()
 }
 
 @Composable

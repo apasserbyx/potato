@@ -73,6 +73,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -120,6 +121,9 @@ fun FocusScreen(
     val context = LocalContext.current
     val app = context.applicationContext as PotatoApp
     val palette = Potato.palette
+    val compactLayout = LocalConfiguration.current.screenHeightDp < 820
+    val ringSize = if (compactLayout) 248.dp else 292.dp
+    val ringAreaHeight = if (compactLayout) 266.dp else 310.dp
     val haptics = LocalHapticFeedback.current
     val store = remember { TimerStore(context) }
     val controller = remember { TimerController(context) }
@@ -401,7 +405,7 @@ fun FocusScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(310.dp),
+                .height(ringAreaHeight),
             contentAlignment = Alignment.Center
         ) {
             TimerRing(
@@ -410,7 +414,7 @@ fun FocusScreen(
                 progress = progress,
                 color = phaseColor,
                 running = isActive && snapshot.status == TimerStatus.RUNNING,
-                modifier = Modifier.size(292.dp)
+                modifier = Modifier.size(ringSize)
             )
         }
 
