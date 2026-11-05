@@ -28,6 +28,7 @@ import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.util.zip.ZipEntry
+import java.util.UUID
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
@@ -44,7 +45,7 @@ data class BackupPreview(
 )
 
 object DataBackup {
-    private const val FORMAT_VERSION = 2
+    private const val FORMAT_VERSION = 3
     private const val MAX_BACKUP_BYTES = 100L * 1024 * 1024
     private const val MAX_JSON_BYTES = 20L * 1024 * 1024
     private const val MAX_SOUND_BYTES = 5L * 1024 * 1024
@@ -59,11 +60,11 @@ object DataBackup {
                 if (old.lastModified() < staleBefore) old.delete()
             }
             val file = File(dir, "Potato-backup-${System.currentTimeMillis()}.zip")
-            val sessions = app.sessions.allSessions()
-            val tasks = app.tasks.allTasks()
-            val presets = app.presets.all()
-            val habits = app.habits.allHabits()
-            val habitLogs = app.habitLogs.allLogs()
+            val sessions = app.sessions.allSessionsIncludingDeleted()
+            val tasks = app.tasks.allTasksIncludingDeleted()
+            val presets = app.presets.allIncludingDeleted()
+            val habits = app.habits.allHabitsIncludingDeleted()
+            val habitLogs = app.habitLogs.allLogsIncludingDeleted()
 
             val soundAssets = linkedMapOf<String, String>()
             val soundKeys = buildSet {
@@ -176,11 +177,11 @@ object DataBackup {
             BackupPreview(
                 zipFile = local,
                 exportedAt = root.optLong("exportedAt"),
-                sessions = root.optJSONArray("sessions")?.length() ?: 0,
-                tasks = root.optJSONArray("tasks")?.length() ?: 0,
-                presets = root.optJSONArray("presets")?.length() ?: 0,
-                habits = root.optJSONArray("habits")?.length() ?: 0,
-                habitLogs = root.optJSONArray("habitLogs")?.length() ?: 0,
+                sessions = activeCount(root.optJSONArray("sessions")),
+                tasks = activeCount(root.optJSONArray("tasks")),
+                presets = activeCount(root.optJSONArray("presets")),
+                habits = activeCount(root.optJSONArray("habits")),
+                habitLogs = activeCount(root.optJSONArray("habitLogs")),
                 icons = icons,
                 sounds = sounds
             )
@@ -278,6 +279,15 @@ object DataBackup {
                                 put("note", o.optString("note"))
                                 put("source", o.optString("source", "timer"))
                                 put("edited_at", nullableLong(o, "editedAt"))
+                                put("sync_id", syncIdOf(o))
+                                put(
+                                    "updated_at",
+                                    updatedAtOf(
+                                        o,
+                                        o.optLong("endedAt", o.optLong("startedAt"))
+                                    )
+                                )
+                                put("deleted_at", nullableLong(o, "deletedAt"))
                             })
                         }
                     }
@@ -293,6 +303,9 @@ object DataBackup {
                                 put("due_date", if (o.isNull("dueDate")) null else o.optString("dueDate"))
                                 put("completed_at", nullableLong(o, "completedAt"))
                                 put("created_at", o.optLong("createdAt"))
+                                put("sync_id", syncIdOf(o))
+                                put("updated_at", updatedAtOf(o, o.optLong("createdAt")))
+                                put("deleted_at", nullableLong(o, "deletedAt"))
                             })
                         }
                     }
@@ -312,6 +325,9 @@ object DataBackup {
                                 put("sound", if (o.optBoolean("sound", true)) 1 else 0)
                                 put("is_default", if (o.optBoolean("isDefault", i == 0)) 1 else 0)
                                 put("sort_order", o.optInt("sortOrder", i))
+                                put("sync_id", syncIdOf(o))
+                                put("updated_at", updatedAtOf(o, System.currentTimeMillis()))
+                                put("deleted_at", nullableLong(o, "deletedAt"))
                             })
                         }
                     }
@@ -357,6 +373,9 @@ object DataBackup {
                                 put("sort_order", o.optInt("sortOrder", i))
                                 put("archived_at", nullableLong(o, "archivedAt"))
                                 put("created_at", o.optLong("createdAt"))
+                                put("sync_id", syncIdOf(o))
+                                put("updated_at", updatedAtOf(o, o.optLong("createdAt")))
+                                put("deleted_at", nullableLong(o, "deletedAt"))
                             })
                         }
                     }
@@ -374,6 +393,15 @@ object DataBackup {
                                 put("source", o.optString("source", "timer"))
                                 put("completed_at", nullableLong(o, "completedAt"))
                                 put("note", o.optString("note"))
+                                put("sync_id", syncIdOf(o))
+                                put(
+                                    "updated_at",
+                                    updatedAtOf(
+                                        o,
+                                        o.optLong("completedAt", System.currentTimeMillis())
+                                    )
+                                )
+                                put("deleted_at", nullableLong(o, "deletedAt"))
                             })
                         }
                     }
@@ -390,6 +418,8 @@ object DataBackup {
                             put("sound", 1)
                             put("is_default", 1)
                             put("sort_order", 0)
+                            put("sync_id", UUID.randomUUID().toString())
+                            put("updated_at", System.currentTimeMillis())
                         })
                     }
                     db.setTransactionSuccessful()
@@ -489,6 +519,22 @@ object DataBackup {
     private fun nullableInt(o: JSONObject, key: String): Int? =
         if (o.isNull(key)) null else o.optInt(key)
 
+    private fun syncIdOf(o: JSONObject): String =
+        o.optString("syncId", "").ifBlank { UUID.randomUUID().toString() }
+
+    private fun updatedAtOf(o: JSONObject, fallback: Long): Long =
+        o.optLong("updatedAt", 0L).takeIf { it > 0L } ?: fallback
+
+    private fun activeCount(rows: JSONArray?): Int {
+        if (rows == null) return 0
+        var count = 0
+        for (i in 0 until rows.length()) {
+            val row = rows.optJSONObject(i) ?: continue
+            if (row.optLong("deletedAt", 0L) == 0L) count++
+        }
+        return count
+    }
+
     private fun sessionToJson(session: com.potato.focus.data.FocusSession) = JSONObject().apply {
         put("id", session.id)
         put("mode", session.mode.name)
@@ -507,6 +553,9 @@ object DataBackup {
         put("note", session.note)
         put("source", session.source)
         put("editedAt", session.editedAt ?: JSONObject.NULL)
+        put("syncId", session.syncId)
+        put("updatedAt", session.updatedAt)
+        put("deletedAt", session.deletedAt ?: JSONObject.NULL)
     }
 
     private fun taskToJson(task: TaskItem) = JSONObject().apply {
@@ -517,6 +566,9 @@ object DataBackup {
         put("dueDate", task.dueDate ?: JSONObject.NULL)
         put("completedAt", task.completedAt ?: JSONObject.NULL)
         put("createdAt", task.createdAt)
+        put("syncId", task.syncId)
+        put("updatedAt", task.updatedAt)
+        put("deletedAt", task.deletedAt ?: JSONObject.NULL)
     }
 
     private fun presetToJson(preset: Preset) = JSONObject().apply {
@@ -531,6 +583,9 @@ object DataBackup {
         put("sound", preset.sound)
         put("isDefault", preset.isDefault)
         put("sortOrder", preset.sortOrder)
+        put("syncId", preset.syncId)
+        put("updatedAt", preset.updatedAt)
+        put("deletedAt", preset.deletedAt ?: JSONObject.NULL)
     }
 
     private fun habitToJson(habit: Habit, iconAsset: String?) = JSONObject().apply {
@@ -554,6 +609,9 @@ object DataBackup {
         put("sortOrder", habit.sortOrder)
         put("archivedAt", habit.archivedAt ?: JSONObject.NULL)
         put("createdAt", habit.createdAt)
+        put("syncId", habit.syncId)
+        put("updatedAt", habit.updatedAt)
+        put("deletedAt", habit.deletedAt ?: JSONObject.NULL)
     }
 
     private fun habitLogToJson(log: HabitLog) = JSONObject().apply {
@@ -566,5 +624,8 @@ object DataBackup {
         put("source", log.source)
         put("completedAt", log.completedAt ?: JSONObject.NULL)
         put("note", log.note)
+        put("syncId", log.syncId)
+        put("updatedAt", log.updatedAt)
+        put("deletedAt", log.deletedAt ?: JSONObject.NULL)
     }
 }

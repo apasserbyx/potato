@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import java.util.UUID
 
 class PotatoDatabase(context: Context) : SQLiteOpenHelper(
     context,
@@ -32,11 +33,15 @@ class PotatoDatabase(context: Context) : SQLiteOpenHelper(
               mood INTEGER,
               note TEXT NOT NULL DEFAULT '',
               source TEXT NOT NULL DEFAULT 'timer',
-              edited_at INTEGER
+              edited_at INTEGER,
+              sync_id TEXT NOT NULL DEFAULT '',
+              updated_at INTEGER NOT NULL DEFAULT 0,
+              deleted_at INTEGER
             )
             """.trimIndent()
         )
         db.execSQL("CREATE INDEX idx_sessions_started ON sessions(started_at)")
+        db.execSQL("CREATE UNIQUE INDEX idx_sessions_sync_id ON sessions(sync_id)")
 
         db.execSQL(
             """
@@ -47,10 +52,14 @@ class PotatoDatabase(context: Context) : SQLiteOpenHelper(
               tag TEXT NOT NULL DEFAULT '',
               due_date TEXT,
               completed_at INTEGER,
-              created_at INTEGER NOT NULL
+              created_at INTEGER NOT NULL,
+              sync_id TEXT NOT NULL DEFAULT '',
+              updated_at INTEGER NOT NULL DEFAULT 0,
+              deleted_at INTEGER
             )
             """.trimIndent()
         )
+        db.execSQL("CREATE UNIQUE INDEX idx_tasks_sync_id ON tasks(sync_id)")
 
         db.execSQL(
             """
@@ -65,10 +74,14 @@ class PotatoDatabase(context: Context) : SQLiteOpenHelper(
               auto_start_focus INTEGER NOT NULL DEFAULT 0,
               sound INTEGER NOT NULL DEFAULT 1,
               is_default INTEGER NOT NULL DEFAULT 0,
-              sort_order INTEGER NOT NULL DEFAULT 0
+              sort_order INTEGER NOT NULL DEFAULT 0,
+              sync_id TEXT NOT NULL DEFAULT '',
+              updated_at INTEGER NOT NULL DEFAULT 0,
+              deleted_at INTEGER
             )
             """.trimIndent()
         )
+        db.execSQL("CREATE UNIQUE INDEX idx_presets_sync_id ON presets(sync_id)")
 
         db.execSQL(
             """
@@ -80,6 +93,7 @@ class PotatoDatabase(context: Context) : SQLiteOpenHelper(
         )
 
         createHabitTables(db)
+        createSyncTables(db)
         seedPresets(db)
     }
 
@@ -106,10 +120,14 @@ class PotatoDatabase(context: Context) : SQLiteOpenHelper(
               note TEXT NOT NULL DEFAULT '',
               sort_order INTEGER NOT NULL DEFAULT 0,
               archived_at INTEGER,
-              created_at INTEGER NOT NULL
+              created_at INTEGER NOT NULL,
+              sync_id TEXT NOT NULL DEFAULT '',
+              updated_at INTEGER NOT NULL DEFAULT 0,
+              deleted_at INTEGER
             )
             """.trimIndent()
         )
+        db.execSQL("CREATE UNIQUE INDEX idx_habits_sync_id ON habits(sync_id)")
         db.execSQL(
             """
             CREATE TABLE habit_logs (
@@ -121,11 +139,50 @@ class PotatoDatabase(context: Context) : SQLiteOpenHelper(
               count_value INTEGER NOT NULL DEFAULT 0,
               source TEXT NOT NULL DEFAULT 'timer',
               completed_at INTEGER,
-              note TEXT NOT NULL DEFAULT ''
+              note TEXT NOT NULL DEFAULT '',
+              sync_id TEXT NOT NULL DEFAULT '',
+              updated_at INTEGER NOT NULL DEFAULT 0,
+              deleted_at INTEGER
             )
             """.trimIndent()
         )
         db.execSQL("CREATE UNIQUE INDEX idx_habit_log_date ON habit_logs(habit_id, date)")
+        db.execSQL("CREATE UNIQUE INDEX idx_habit_logs_sync_id ON habit_logs(sync_id)")
+    }
+
+    private fun createSyncTables(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS sync_settings (
+              key TEXT PRIMARY KEY,
+              value TEXT NOT NULL,
+              updated_at INTEGER NOT NULL,
+              deleted_at INTEGER
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS sync_peers (
+              device_id TEXT PRIMARY KEY,
+              device_name TEXT NOT NULL,
+              token_hash TEXT NOT NULL,
+              certificate_fingerprint TEXT NOT NULL,
+              last_sync_at INTEGER,
+              last_cursor INTEGER,
+              created_at INTEGER NOT NULL,
+              revoked_at INTEGER
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS sync_meta (
+              key TEXT PRIMARY KEY,
+              value TEXT NOT NULL
+            )
+            """.trimIndent()
+        )
     }
 
     private fun seedPresets(db: SQLiteDatabase) {
@@ -146,6 +203,8 @@ class PotatoDatabase(context: Context) : SQLiteOpenHelper(
                 put("sound", row[7] as Int)
                 put("is_default", row[8] as Int)
                 put("sort_order", row[9] as Int)
+                put("sync_id", UUID.randomUUID().toString())
+                put("updated_at", System.currentTimeMillis())
             }
             db.insert("presets", null, values)
         }
@@ -156,17 +215,55 @@ class PotatoDatabase(context: Context) : SQLiteOpenHelper(
             db.execSQL("ALTER TABLE sessions ADD COLUMN habit_id INTEGER")
             createHabitTables(db)
         }
-        if (oldVersion >= 2 && oldVersion < 3) {
+        if (oldVersion < 3) {
             db.execSQL("ALTER TABLE habits ADD COLUMN reminder_mode TEXT NOT NULL DEFAULT 'SLOT'")
             db.execSQL("ALTER TABLE habits ADD COLUMN reminder_minutes INTEGER NOT NULL DEFAULT -1")
             db.execSQL("ALTER TABLE habits ADD COLUMN sound_key TEXT NOT NULL DEFAULT ''")
             db.execSQL("ALTER TABLE habits ADD COLUMN icon_type TEXT NOT NULL DEFAULT 'EMOJI'")
             db.execSQL("ALTER TABLE habits ADD COLUMN icon_image_path TEXT NOT NULL DEFAULT ''")
         }
+        if (oldVersion < 4) {
+            upgradeToV4(db)
+        }
+    }
+
+    private fun upgradeToV4(db: SQLiteDatabase) {
+        listOf("sessions", "tasks", "presets", "habits", "habit_logs").forEach { table ->
+            db.execSQL("ALTER TABLE $table ADD COLUMN sync_id TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE $table ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE $table ADD COLUMN deleted_at INTEGER")
+        }
+        db.execSQL(
+            "UPDATE sessions SET sync_id = lower(hex(randomblob(16))), " +
+                "updated_at = COALESCE(ended_at, started_at) WHERE sync_id = ''"
+        )
+        db.execSQL(
+            "UPDATE tasks SET sync_id = lower(hex(randomblob(16))), " +
+                "updated_at = COALESCE(completed_at, created_at) WHERE sync_id = ''"
+        )
+        db.execSQL(
+            "UPDATE presets SET sync_id = lower(hex(randomblob(16))), " +
+                "updated_at = CAST(strftime('%s','now') AS INTEGER) * 1000 WHERE sync_id = ''"
+        )
+        db.execSQL(
+            "UPDATE habits SET sync_id = lower(hex(randomblob(16))), " +
+                "updated_at = created_at WHERE sync_id = ''"
+        )
+        db.execSQL(
+            "UPDATE habit_logs SET sync_id = lower(hex(randomblob(16))), " +
+                "updated_at = COALESCE(completed_at, CAST(strftime('%s','now') AS INTEGER) * 1000) " +
+                "WHERE sync_id = ''"
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_sync_id ON sessions(sync_id)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_sync_id ON tasks(sync_id)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_presets_sync_id ON presets(sync_id)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_habits_sync_id ON habits(sync_id)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_habit_logs_sync_id ON habit_logs(sync_id)")
+        createSyncTables(db)
     }
 
     companion object {
-        const val DATABASE_VERSION = 3
+        const val DATABASE_VERSION = 4
     }
 }
 
@@ -211,6 +308,8 @@ class SessionDao(private val helper: PotatoDatabase) {
             put("task_title", taskTitle)
             put("tag", tag)
             put("source", "timer")
+            put("sync_id", UUID.randomUUID().toString())
+            put("updated_at", System.currentTimeMillis())
         }
         return helper.writableDatabase.insert("sessions", null, values)
     }
@@ -219,6 +318,7 @@ class SessionDao(private val helper: PotatoDatabase) {
         val values = ContentValues().apply {
             put("focused_seconds", focusedSeconds)
             put("paused_seconds", pausedSeconds)
+            put("updated_at", System.currentTimeMillis())
         }
         helper.writableDatabase.update("sessions", values, "id = ?", arrayOf(id.toString()))
     }
@@ -239,6 +339,7 @@ class SessionDao(private val helper: PotatoDatabase) {
             put("paused_seconds", pausedSeconds)
             put("mood", mood)
             put("note", note)
+            put("updated_at", System.currentTimeMillis())
         }
         helper.writableDatabase.update("sessions", values, "id = ?", arrayOf(id.toString()))
     }
@@ -259,6 +360,8 @@ class SessionDao(private val helper: PotatoDatabase) {
             put("mood", session.mood)
             put("note", session.note)
             put("edited_at", System.currentTimeMillis())
+            put("updated_at", System.currentTimeMillis())
+            if (session.syncId.isNotBlank()) put("sync_id", session.syncId)
         }
         helper.writableDatabase.update("sessions", values, "id = ?", arrayOf(session.id.toString()))
     }
@@ -269,28 +372,55 @@ class SessionDao(private val helper: PotatoDatabase) {
     fun allSessions(): List<FocusSession> =
         query(null, null, "started_at DESC")
 
+    fun allSessionsIncludingDeleted(): List<FocusSession> =
+        query(null, null, "started_at DESC", includeDeleted = true)
+
     fun recent(limit: Int): List<FocusSession> =
         query(null, null, "started_at DESC", limit)
 
     fun deleteSession(id: Long) {
-        helper.writableDatabase.delete("sessions", "id = ?", arrayOf(id.toString()))
+        val now = System.currentTimeMillis()
+        helper.writableDatabase.update(
+            "sessions",
+            ContentValues().apply {
+                put("deleted_at", now)
+                put("updated_at", now)
+            },
+            "id = ? AND deleted_at IS NULL",
+            arrayOf(id.toString())
+        )
     }
 
     fun clearAll() {
-        helper.writableDatabase.delete("sessions", null, null)
+        val now = System.currentTimeMillis()
+        helper.writableDatabase.update(
+            "sessions",
+            ContentValues().apply {
+                put("deleted_at", now)
+                put("updated_at", now)
+            },
+            "deleted_at IS NULL",
+            null
+        )
     }
 
     private fun query(
         selection: String?,
         args: Array<String>?,
         orderBy: String,
-        limit: Int? = null
+        limit: Int? = null,
+        includeDeleted: Boolean = false
     ): List<FocusSession> {
+        val where = when {
+            includeDeleted -> selection
+            selection == null -> "deleted_at IS NULL"
+            else -> "($selection) AND deleted_at IS NULL"
+        }
         val rows = mutableListOf<FocusSession>()
         val cursor = helper.readableDatabase.query(
             "sessions",
             null,
-            selection,
+            where,
             args,
             null,
             null,
@@ -324,7 +454,10 @@ class SessionDao(private val helper: PotatoDatabase) {
         mood = getIntOrNull("mood"),
         note = getString(getColumnIndexOrThrow("note")),
         source = getString(getColumnIndexOrThrow("source")),
-        editedAt = getLongOrNull("edited_at")
+        editedAt = getLongOrNull("edited_at"),
+        syncId = getString(getColumnIndexOrThrow("sync_id")),
+        updatedAt = getLong(getColumnIndexOrThrow("updated_at")),
+        deletedAt = getLongOrNull("deleted_at")
     )
 
     private fun Cursor.getLongOrNull(name: String): Long? {
@@ -346,31 +479,58 @@ class TaskDao(private val helper: PotatoDatabase) {
     fun allTasks(): List<TaskItem> =
         query(null, null, "created_at DESC")
 
+    fun allTasksIncludingDeleted(): List<TaskItem> =
+        query(null, null, "created_at DESC", includeDeleted = true)
+
     fun add(title: String, estimate: Int, tag: String): Long {
+        val now = System.currentTimeMillis()
         val values = ContentValues().apply {
             put("title", title.trim())
             put("estimate_pomodoros", estimate.coerceIn(1, 20))
             put("tag", tag)
-            put("created_at", System.currentTimeMillis())
+            put("created_at", now)
+            put("sync_id", UUID.randomUUID().toString())
+            put("updated_at", now)
         }
         return helper.writableDatabase.insert("tasks", null, values)
     }
 
     fun setCompleted(id: Long, completed: Boolean) {
+        val now = System.currentTimeMillis()
         val values = ContentValues().apply {
-            put("completed_at", if (completed) System.currentTimeMillis() else null)
+            put("completed_at", if (completed) now else null)
+            put("updated_at", now)
         }
         helper.writableDatabase.update("tasks", values, "id = ?", arrayOf(id.toString()))
     }
 
     fun delete(id: Long) {
-        helper.writableDatabase.delete("tasks", "id = ?", arrayOf(id.toString()))
+        val now = System.currentTimeMillis()
+        helper.writableDatabase.update(
+            "tasks",
+            ContentValues().apply {
+                put("deleted_at", now)
+                put("updated_at", now)
+            },
+            "id = ? AND deleted_at IS NULL",
+            arrayOf(id.toString())
+        )
     }
 
-    private fun query(selection: String?, args: Array<String>?, orderBy: String): List<TaskItem> {
+    private fun query(
+        selection: String?,
+        args: Array<String>?,
+        orderBy: String,
+        includeDeleted: Boolean = false
+    ): List<TaskItem> {
+        val where = when {
+            includeDeleted -> selection
+            selection == null -> "deleted_at IS NULL"
+            else -> "($selection) AND deleted_at IS NULL"
+        }
         val rows = mutableListOf<TaskItem>()
         helper.readableDatabase.query(
-            "tasks", null, selection, args, null, null, orderBy
+            "tasks", null, where, args, null, null, orderBy
         ).use { cursor ->
             while (cursor.moveToNext()) {
                 rows += TaskItem(
@@ -381,7 +541,11 @@ class TaskDao(private val helper: PotatoDatabase) {
                     dueDate = cursor.getString(cursor.getColumnIndexOrThrow("due_date")),
                     completedAt = if (cursor.isNull(cursor.getColumnIndexOrThrow("completed_at"))) null
                     else cursor.getLong(cursor.getColumnIndexOrThrow("completed_at")),
-                    createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("created_at"))
+                    createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("created_at")),
+                    syncId = cursor.getString(cursor.getColumnIndexOrThrow("sync_id")),
+                    updatedAt = cursor.getLong(cursor.getColumnIndexOrThrow("updated_at")),
+                    deletedAt = if (cursor.isNull(cursor.getColumnIndexOrThrow("deleted_at"))) null
+                    else cursor.getLong(cursor.getColumnIndexOrThrow("deleted_at"))
                 )
             }
         }
@@ -393,12 +557,14 @@ class PresetDao(private val helper: PotatoDatabase) {
 
     fun all(): List<Preset> = query(null, null)
 
+    fun allIncludingDeleted(): List<Preset> = query(null, null, includeDeleted = true)
+
     fun default(): Preset? = query("is_default = 1", null).firstOrNull() ?: all().firstOrNull()
 
     fun byId(id: Long): Preset? = query("id = ?", arrayOf(id.toString())).firstOrNull()
 
     fun insert(preset: Preset): Long {
-        val values = preset.toValues(includeId = false)
+        val values = preset.toValues(includeId = false, newRecord = true)
         return helper.writableDatabase.insert("presets", null, values)
     }
 
@@ -406,30 +572,56 @@ class PresetDao(private val helper: PotatoDatabase) {
         helper.writableDatabase.update(
             "presets",
             preset.toValues(includeId = false),
-            "id = ?",
+            "id = ? AND deleted_at IS NULL",
             arrayOf(preset.id.toString())
         )
     }
 
     fun delete(id: Long) {
-        helper.writableDatabase.delete("presets", "id = ?", arrayOf(id.toString()))
+        val now = System.currentTimeMillis()
+        helper.writableDatabase.update(
+            "presets",
+            ContentValues().apply {
+                put("deleted_at", now)
+                put("updated_at", now)
+                put("is_default", 0)
+            },
+            "id = ? AND deleted_at IS NULL",
+            arrayOf(id.toString())
+        )
     }
 
     fun setDefault(id: Long) {
+        val now = System.currentTimeMillis()
         helper.writableDatabase.beginTransaction()
         try {
-            helper.writableDatabase.execSQL("UPDATE presets SET is_default = 0")
-            helper.writableDatabase.execSQL("UPDATE presets SET is_default = 1 WHERE id = $id")
+            helper.writableDatabase.execSQL(
+                "UPDATE presets SET is_default = 0, updated_at = ? WHERE deleted_at IS NULL",
+                arrayOf(now)
+            )
+            helper.writableDatabase.execSQL(
+                "UPDATE presets SET is_default = 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+                arrayOf(now, id)
+            )
             helper.writableDatabase.setTransactionSuccessful()
         } finally {
             helper.writableDatabase.endTransaction()
         }
     }
 
-    private fun query(selection: String?, args: Array<String>?): List<Preset> {
+    private fun query(
+        selection: String?,
+        args: Array<String>?,
+        includeDeleted: Boolean = false
+    ): List<Preset> {
+        val where = when {
+            includeDeleted -> selection
+            selection == null -> "deleted_at IS NULL"
+            else -> "($selection) AND deleted_at IS NULL"
+        }
         val rows = mutableListOf<Preset>()
         helper.readableDatabase.query(
-            "presets", null, selection, args, null, null, "sort_order ASC, id ASC"
+            "presets", null, where, args, null, null, "sort_order ASC, id ASC"
         ).use { cursor ->
             while (cursor.moveToNext()) {
                 rows += Preset(
@@ -443,14 +635,21 @@ class PresetDao(private val helper: PotatoDatabase) {
                     autoStartFocus = cursor.getInt(cursor.getColumnIndexOrThrow("auto_start_focus")) == 1,
                     sound = cursor.getInt(cursor.getColumnIndexOrThrow("sound")) == 1,
                     isDefault = cursor.getInt(cursor.getColumnIndexOrThrow("is_default")) == 1,
-                    sortOrder = cursor.getInt(cursor.getColumnIndexOrThrow("sort_order"))
+                    sortOrder = cursor.getInt(cursor.getColumnIndexOrThrow("sort_order")),
+                    syncId = cursor.getString(cursor.getColumnIndexOrThrow("sync_id")),
+                    updatedAt = cursor.getLong(cursor.getColumnIndexOrThrow("updated_at")),
+                    deletedAt = if (cursor.isNull(cursor.getColumnIndexOrThrow("deleted_at"))) null
+                    else cursor.getLong(cursor.getColumnIndexOrThrow("deleted_at"))
                 )
             }
         }
         return rows
     }
 
-    private fun Preset.toValues(includeId: Boolean): ContentValues = ContentValues().apply {
+    private fun Preset.toValues(
+        includeId: Boolean,
+        newRecord: Boolean = false
+    ): ContentValues = ContentValues().apply {
         if (includeId) put("id", id)
         put("name", name)
         put("focus_min", focusMin)
@@ -462,5 +661,10 @@ class PresetDao(private val helper: PotatoDatabase) {
         put("sound", if (sound) 1 else 0)
         put("is_default", if (isDefault) 1 else 0)
         put("sort_order", sortOrder)
+        put("updated_at", System.currentTimeMillis())
+        put("deleted_at", deletedAt)
+        if (newRecord) {
+            put("sync_id", syncId.ifBlank { UUID.randomUUID().toString() })
+        }
     }
 }

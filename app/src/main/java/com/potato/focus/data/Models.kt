@@ -32,7 +32,10 @@ data class FocusSession(
     val mood: Int?,
     val note: String,
     val source: String,
-    val editedAt: Long?
+    val editedAt: Long?,
+    val syncId: String = "",
+    val updatedAt: Long = 0L,
+    val deletedAt: Long? = null
 ) {
     val isFocus: Boolean
         get() = mode == SessionMode.FOCUS || mode == SessionMode.OPEN || mode == SessionMode.HABIT
@@ -48,7 +51,10 @@ data class TaskItem(
     val tag: String,
     val dueDate: String?,
     val completedAt: Long?,
-    val createdAt: Long
+    val createdAt: Long,
+    val syncId: String = "",
+    val updatedAt: Long = 0L,
+    val deletedAt: Long? = null
 )
 
 data class Preset(
@@ -62,7 +68,10 @@ data class Preset(
     val autoStartFocus: Boolean,
     val sound: Boolean,
     val isDefault: Boolean,
-    val sortOrder: Int
+    val sortOrder: Int,
+    val syncId: String = "",
+    val updatedAt: Long = 0L,
+    val deletedAt: Long? = null
 )
 
 enum class HabitType {
@@ -120,7 +129,10 @@ data class Habit(
     val note: String,
     val sortOrder: Int,
     val archivedAt: Long?,
-    val createdAt: Long
+    val createdAt: Long,
+    val syncId: String = "",
+    val updatedAt: Long = 0L,
+    val deletedAt: Long? = null
 )
 
 data class HabitLog(
@@ -132,7 +144,10 @@ data class HabitLog(
     val countValue: Int,
     val source: String,
     val completedAt: Long?,
-    val note: String
+    val note: String,
+    val syncId: String = "",
+    val updatedAt: Long = 0L,
+    val deletedAt: Long? = null
 )
 
 fun Habit.isScheduledOn(date: java.time.LocalDate): Boolean {

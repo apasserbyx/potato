@@ -3,6 +3,7 @@ package com.potato.focus.data
 import android.content.ContentValues
 import android.database.Cursor
 import java.time.LocalDate
+import java.util.UUID
 
 class HabitDao(private val helper: PotatoDatabase) {
 
@@ -12,11 +13,14 @@ class HabitDao(private val helper: PotatoDatabase) {
     fun allHabits(): List<Habit> =
         query(null, null)
 
+    fun allHabitsIncludingDeleted(): List<Habit> =
+        query(null, null, includeDeleted = true)
+
     fun byId(id: Long): Habit? =
         query("id = ?", arrayOf(id.toString())).firstOrNull()
 
     fun insert(habit: Habit): Long {
-        val values = habit.toValues(includeId = false)
+        val values = habit.toValues(includeId = false, newRecord = true)
         return helper.writableDatabase.insert("habits", null, values)
     }
 
@@ -24,24 +28,50 @@ class HabitDao(private val helper: PotatoDatabase) {
         helper.writableDatabase.update(
             "habits",
             habit.toValues(includeId = false),
-            "id = ?",
+            "id = ? AND deleted_at IS NULL",
             arrayOf(habit.id.toString())
         )
     }
 
     fun archive(id: Long, archivedAt: Long = System.currentTimeMillis()) {
-        val values = ContentValues().apply { put("archived_at", archivedAt) }
-        helper.writableDatabase.update("habits", values, "id = ?", arrayOf(id.toString()))
+        val values = ContentValues().apply {
+            put("archived_at", archivedAt)
+            put("updated_at", archivedAt)
+        }
+        helper.writableDatabase.update(
+            "habits",
+            values,
+            "id = ? AND deleted_at IS NULL",
+            arrayOf(id.toString())
+        )
     }
 
     fun delete(id: Long) {
-        helper.writableDatabase.delete("habits", "id = ?", arrayOf(id.toString()))
+        val now = System.currentTimeMillis()
+        helper.writableDatabase.update(
+            "habits",
+            ContentValues().apply {
+                put("deleted_at", now)
+                put("updated_at", now)
+            },
+            "id = ? AND deleted_at IS NULL",
+            arrayOf(id.toString())
+        )
     }
 
-    private fun query(selection: String?, args: Array<String>?): List<Habit> {
+    private fun query(
+        selection: String?,
+        args: Array<String>?,
+        includeDeleted: Boolean = false
+    ): List<Habit> {
+        val where = when {
+            includeDeleted -> selection
+            selection == null -> "deleted_at IS NULL"
+            else -> "($selection) AND deleted_at IS NULL"
+        }
         val rows = mutableListOf<Habit>()
         helper.readableDatabase.query(
-            "habits", null, selection, args, null, null, "sort_order ASC, id ASC"
+            "habits", null, where, args, null, null, "sort_order ASC, id ASC"
         ).use { cursor ->
             while (cursor.moveToNext()) rows += cursor.toHabit()
         }
@@ -76,7 +106,10 @@ class HabitDao(private val helper: PotatoDatabase) {
         note = getString(getColumnIndexOrThrow("note")),
         sortOrder = getInt(getColumnIndexOrThrow("sort_order")),
         archivedAt = getLongOrNull("archived_at"),
-        createdAt = getLong(getColumnIndexOrThrow("created_at"))
+        createdAt = getLong(getColumnIndexOrThrow("created_at")),
+        syncId = getString(getColumnIndexOrThrow("sync_id")),
+        updatedAt = getLong(getColumnIndexOrThrow("updated_at")),
+        deletedAt = getLongOrNull("deleted_at")
     )
 
     private fun Cursor.getLongOrNull(name: String): Long? {
@@ -92,7 +125,10 @@ class HabitDao(private val helper: PotatoDatabase) {
         else -> hex
     }
 
-    private fun Habit.toValues(includeId: Boolean): ContentValues = ContentValues().apply {
+    private fun Habit.toValues(
+        includeId: Boolean,
+        newRecord: Boolean = false
+    ): ContentValues = ContentValues().apply {
         if (includeId) put("id", id)
         put("name", name)
         put("icon", icon)
@@ -113,6 +149,11 @@ class HabitDao(private val helper: PotatoDatabase) {
         put("sort_order", sortOrder)
         put("archived_at", archivedAt)
         put("created_at", createdAt)
+        put("updated_at", System.currentTimeMillis())
+        put("deleted_at", deletedAt)
+        if (newRecord) {
+            put("sync_id", syncId.ifBlank { UUID.randomUUID().toString() })
+        }
     }
 }
 
@@ -129,8 +170,20 @@ class HabitLogDao(private val helper: PotatoDatabase) {
 
     fun allLogs(): List<HabitLog> = query(null, null, "date DESC")
 
+    fun allLogsIncludingDeleted(): List<HabitLog> =
+        query(null, null, "date DESC", includeDeleted = true)
+
     fun clearAll() {
-        helper.writableDatabase.delete("habit_logs", null, null)
+        val now = System.currentTimeMillis()
+        helper.writableDatabase.update(
+            "habit_logs",
+            ContentValues().apply {
+                put("deleted_at", now)
+                put("updated_at", now)
+            },
+            "deleted_at IS NULL",
+            null
+        )
     }
 
     fun get(habitId: Long, date: LocalDate): HabitLog? =
@@ -153,7 +206,8 @@ class HabitLogDao(private val helper: PotatoDatabase) {
         db.beginTransaction()
         try {
             val existing = getLocked(db, habitId, date)
-            val focused = (existing?.focusedSeconds ?: 0) + seconds.coerceAtLeast(0)
+            val active = existing?.takeIf { it.deletedAt == null }
+            val focused = (active?.focusedSeconds ?: 0) + seconds.coerceAtLeast(0)
             val completed = focused >= targetSeconds.coerceAtLeast(1)
             val status = if (completed) HabitLogStatus.COMPLETED else HabitLogStatus.PENDING
             val log = HabitLog(
@@ -162,10 +216,12 @@ class HabitLogDao(private val helper: PotatoDatabase) {
                 date = date.toString(),
                 status = status,
                 focusedSeconds = focused,
-                countValue = existing?.countValue ?: 0,
+                countValue = active?.countValue ?: 0,
                 source = "timer",
                 completedAt = if (completed) System.currentTimeMillis() else null,
-                note = existing?.note.orEmpty()
+                note = active?.note.orEmpty(),
+                syncId = existing?.syncId.orEmpty(),
+                updatedAt = System.currentTimeMillis()
             )
             upsertLocked(db, log, existing == null)
             db.setTransactionSuccessful()
@@ -185,7 +241,8 @@ class HabitLogDao(private val helper: PotatoDatabase) {
         db.beginTransaction()
         try {
             val existing = getLocked(db, habitId, date)
-            val newCount = ((existing?.countValue ?: 0) + delta).coerceIn(0, 9999)
+            val active = existing?.takeIf { it.deletedAt == null }
+            val newCount = ((active?.countValue ?: 0) + delta).coerceIn(0, 9999)
             val completed = newCount >= targetCount.coerceAtLeast(1)
             val status = if (completed) HabitLogStatus.COMPLETED else HabitLogStatus.PENDING
             val log = HabitLog(
@@ -193,11 +250,13 @@ class HabitLogDao(private val helper: PotatoDatabase) {
                 habitId = habitId,
                 date = date.toString(),
                 status = status,
-                focusedSeconds = existing?.focusedSeconds ?: 0,
+                focusedSeconds = active?.focusedSeconds ?: 0,
                 countValue = newCount,
                 source = "manual",
                 completedAt = if (completed) System.currentTimeMillis() else null,
-                note = existing?.note.orEmpty()
+                note = active?.note.orEmpty(),
+                syncId = existing?.syncId.orEmpty(),
+                updatedAt = System.currentTimeMillis()
             )
             upsertLocked(db, log, existing == null)
             db.setTransactionSuccessful()
@@ -212,16 +271,19 @@ class HabitLogDao(private val helper: PotatoDatabase) {
         db.beginTransaction()
         try {
             val existing = getLocked(db, habitId, date)
+            val active = existing?.takeIf { it.deletedAt == null }
             val log = HabitLog(
                 id = existing?.id ?: 0L,
                 habitId = habitId,
                 date = date.toString(),
                 status = HabitLogStatus.COMPLETED,
-                focusedSeconds = existing?.focusedSeconds ?: 0,
-                countValue = existing?.countValue ?: 0,
+                focusedSeconds = active?.focusedSeconds ?: 0,
+                countValue = active?.countValue ?: 0,
                 source = "manual",
                 completedAt = System.currentTimeMillis(),
-                note = existing?.note.orEmpty()
+                note = active?.note.orEmpty(),
+                syncId = existing?.syncId.orEmpty(),
+                updatedAt = System.currentTimeMillis()
             )
             upsertLocked(db, log, existing == null)
             db.setTransactionSuccessful()
@@ -236,16 +298,19 @@ class HabitLogDao(private val helper: PotatoDatabase) {
         db.beginTransaction()
         try {
             val existing = getLocked(db, habitId, date)
+            val active = existing?.takeIf { it.deletedAt == null }
             val log = HabitLog(
                 id = existing?.id ?: 0L,
                 habitId = habitId,
                 date = date.toString(),
                 status = HabitLogStatus.SKIPPED,
-                focusedSeconds = existing?.focusedSeconds ?: 0,
-                countValue = existing?.countValue ?: 0,
+                focusedSeconds = active?.focusedSeconds ?: 0,
+                countValue = active?.countValue ?: 0,
                 source = "manual",
                 completedAt = null,
-                note = existing?.note.orEmpty()
+                note = active?.note.orEmpty(),
+                syncId = existing?.syncId.orEmpty(),
+                updatedAt = System.currentTimeMillis()
             )
             upsertLocked(db, log, existing == null)
             db.setTransactionSuccessful()
@@ -284,6 +349,9 @@ class HabitLogDao(private val helper: PotatoDatabase) {
             put("source", log.source)
             put("completed_at", log.completedAt)
             put("note", log.note)
+            put("sync_id", log.syncId.ifBlank { UUID.randomUUID().toString() })
+            put("updated_at", System.currentTimeMillis())
+            putNull("deleted_at")
         }
         if (insert) {
             db.insert("habit_logs", null, values)
@@ -300,11 +368,17 @@ class HabitLogDao(private val helper: PotatoDatabase) {
     private fun query(
         selection: String?,
         args: Array<String>?,
-        orderBy: String = "date ASC"
+        orderBy: String = "date ASC",
+        includeDeleted: Boolean = false
     ): List<HabitLog> {
+        val where = when {
+            includeDeleted -> selection
+            selection == null -> "deleted_at IS NULL"
+            else -> "($selection) AND deleted_at IS NULL"
+        }
         val rows = mutableListOf<HabitLog>()
         helper.readableDatabase.query(
-            "habit_logs", null, selection, args, null, null, orderBy
+            "habit_logs", null, where, args, null, null, orderBy
         ).use { cursor ->
             while (cursor.moveToNext()) rows += cursor.toLog()
         }
@@ -323,6 +397,10 @@ class HabitLogDao(private val helper: PotatoDatabase) {
         source = getString(getColumnIndexOrThrow("source")),
         completedAt = if (isNull(getColumnIndexOrThrow("completed_at"))) null
         else getLong(getColumnIndexOrThrow("completed_at")),
-        note = getString(getColumnIndexOrThrow("note"))
+        note = getString(getColumnIndexOrThrow("note")),
+        syncId = getString(getColumnIndexOrThrow("sync_id")),
+        updatedAt = getLong(getColumnIndexOrThrow("updated_at")),
+        deletedAt = if (isNull(getColumnIndexOrThrow("deleted_at"))) null
+        else getLong(getColumnIndexOrThrow("deleted_at"))
     )
 }
