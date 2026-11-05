@@ -1,0 +1,905 @@
+package com.potato.focus.ui.settings
+
+import android.Manifest
+import android.app.AlarmManager
+import android.app.TimePickerDialog
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import com.potato.focus.PotatoApp
+import com.potato.focus.data.HabitReminderSlot
+import com.potato.focus.data.Preset
+import com.potato.focus.habits.HabitReminderScheduler
+import com.potato.focus.ui.components.PotatoCard
+import com.potato.focus.ui.components.SectionLabel
+import com.potato.focus.ui.components.TagPill
+import com.potato.focus.ui.theme.Potato
+import com.potato.focus.util.DataExport
+import java.util.Locale
+
+@Composable
+fun SettingsScreen(onDataChanged: () -> Unit) {
+    val context = LocalContext.current
+    val app = context.applicationContext as PotatoApp
+    val palette = Potato.palette
+    val settings = app.settings
+
+    var goal by remember { mutableIntStateOf(settings.dailyGoalMinutes) }
+    var keepScreenOn by remember { mutableStateOf(settings.keepScreenOn) }
+    var presets by remember { mutableStateOf<List<Preset>>(emptyList()) }
+    var editingPreset by remember { mutableStateOf<Preset?>(null) }
+    var showClearDialog by remember { mutableStateOf(false) }
+    var showBackgroundHelp by remember { mutableStateOf(false) }
+    var notificationsEnabled by remember {
+        mutableStateOf(NotificationManagerCompat.from(context).areNotificationsEnabled())
+    }
+    var habitMorningMin by remember { mutableIntStateOf(settings.habitSlotMinutes(HabitReminderSlot.MORNING)) }
+    var habitAfternoonMin by remember { mutableIntStateOf(settings.habitSlotMinutes(HabitReminderSlot.AFTERNOON)) }
+    var habitEveningMin by remember { mutableIntStateOf(settings.habitSlotMinutes(HabitReminderSlot.EVENING)) }
+    var habitMorningEnabled by remember { mutableStateOf(settings.habitSlotEnabled(HabitReminderSlot.MORNING)) }
+    var habitAfternoonEnabled by remember { mutableStateOf(settings.habitSlotEnabled(HabitReminderSlot.AFTERNOON)) }
+    var habitEveningEnabled by remember { mutableStateOf(settings.habitSlotEnabled(HabitReminderSlot.EVENING)) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
+    }
+
+    fun reloadPresets() {
+        presets = app.presets.all()
+    }
+
+    LaunchedEffect(Unit) { reloadPresets() }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
+    }
+
+    fun openNotificationSettings() {
+        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { context.startActivity(intent) }
+    }
+
+    fun enableNotifications() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            openNotificationSettings()
+        }
+    }
+
+    fun openAppDetails() {
+        val intent = Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:${context.packageName}")
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(intent) }
+    }
+
+    val exactAlarmOk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
+    } else true
+
+    fun pickHabitTime(
+        slot: HabitReminderSlot,
+        currentMinutes: Int,
+        onPicked: (Int) -> Unit
+    ) {
+        TimePickerDialog(
+            context,
+            { _, hour, minute ->
+                val value = hour * 60 + minute
+                onPicked(value)
+                settings.setHabitSlotMinutes(slot, value)
+                HabitReminderScheduler.scheduleAll(context)
+            },
+            currentMinutes / 60,
+            currentMinutes % 60,
+            true
+        ).show()
+    }
+
+    fun toggleHabitSlot(slot: HabitReminderSlot, enabled: Boolean, update: (Boolean) -> Unit) {
+        update(enabled)
+        settings.setHabitSlotEnabled(slot, enabled)
+        HabitReminderScheduler.scheduleAll(context)
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            Spacer(Modifier.height(12.dp))
+            Text("设置", style = MaterialTheme.typography.headlineLarge, color = palette.ink)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "让 Potato 更适合你的节奏。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = palette.muted
+            )
+        }
+
+        item {
+            PotatoCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("每日目标", style = MaterialTheme.typography.titleMedium, color = palette.ink)
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                "用分钟记录，比颗数更诚实",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = palette.muted
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            StepperButton("−") {
+                                goal = (goal - 15).coerceAtLeast(15)
+                                settings.dailyGoalMinutes = goal
+                                onDataChanged()
+                            }
+                            Text(
+                                "$goal",
+                                style = MaterialTheme.typography.headlineMedium,
+                                color = palette.ink,
+                                modifier = Modifier.padding(horizontal = 12.dp)
+                            )
+                            StepperButton("+") {
+                                goal = (goal + 15).coerceAtMost(720)
+                                settings.dailyGoalMinutes = goal
+                                onDataChanged()
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text("分钟 / 天", style = MaterialTheme.typography.labelMedium, color = palette.muted)
+                }
+            }
+        }
+
+        item {
+            SectionLabel(
+                text = "我的节奏",
+                trailing = "添加",
+                onTrailing = {
+                    editingPreset = Preset(
+                        id = 0L,
+                        name = "新节奏",
+                        focusMin = 25,
+                        shortBreakMin = 5,
+                        longBreakMin = 15,
+                        longBreakEvery = 4,
+                        autoStartBreak = true,
+                        autoStartFocus = false,
+                        sound = true,
+                        isDefault = presets.isEmpty(),
+                        sortOrder = presets.size
+                    )
+                }
+            )
+        }
+
+        item {
+            PotatoCard(Modifier.fillMaxWidth()) {
+                Column {
+                    presets.forEachIndexed { index, preset ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { editingPreset = preset }
+                                .padding(horizontal = 16.dp, vertical = 13.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .clip(CircleShape)
+                                    .border(
+                                        1.5.dp,
+                                        if (preset.isDefault) palette.focus else palette.line,
+                                        CircleShape
+                                    )
+                                    .clickable {
+                                        app.presets.setDefault(preset.id)
+                                        settings.selectedPresetId = preset.id
+                                        reloadPresets()
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (preset.isDefault) {
+                                    Box(
+                                        Modifier
+                                            .size(11.dp)
+                                            .clip(CircleShape)
+                                            .background(palette.focus)
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        preset.name,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = palette.ink,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (preset.isDefault) {
+                                        Spacer(Modifier.width(8.dp))
+                                        TagPill("默认")
+                                    }
+                                }
+                                Spacer(Modifier.height(3.dp))
+                                Text(
+                                    "${preset.focusMin} 专注 · ${preset.shortBreakMin} 短休 · ${preset.longBreakMin} 长休",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = palette.muted
+                                )
+                            }
+                            Icon(
+                                Icons.Rounded.ChevronRight,
+                                contentDescription = "编辑",
+                                tint = palette.muted,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+                        if (index != presets.lastIndex) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 50.dp)
+                                    .height(1.dp)
+                                    .background(palette.line)
+                            )
+                        }
+                    }
+                    if (presets.isEmpty()) {
+                        Text(
+                            "还没有自定义节奏。",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = palette.muted,
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        item { SectionLabel("提醒与后台") }
+
+        item {
+            PotatoCard(Modifier.fillMaxWidth()) {
+                Column {
+                    SettingRow(
+                        icon = Icons.Rounded.Notifications,
+                        title = "通知权限",
+                        subtitle = if (notificationsEnabled) "已开启，计时结束会提醒你" else "未开启，结束提醒可能看不到",
+                        trailing = if (notificationsEnabled) "已开启" else "去开启",
+                        onClick = { if (notificationsEnabled) openNotificationSettings() else enableNotifications() }
+                    )
+                    DividerLine()
+                    SettingRow(
+                        icon = Icons.Rounded.Info,
+                        title = "精确提醒",
+                        subtitle = if (exactAlarmOk) "系统允许精确闹钟" else "后台提醒可能延迟，建议允许精确闹钟",
+                        trailing = if (exactAlarmOk) "已允许" else "设置",
+                        onClick = {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(
+                                            Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                                            Uri.parse("package:${context.packageName}")
+                                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                }
+                            }
+                        }
+                    )
+                    DividerLine()
+                    SettingRow(
+                        icon = Icons.Rounded.Info,
+                        title = "后台运行帮助",
+                        subtitle = "国产手机省电策略可能中断计时",
+                        trailing = "查看",
+                        onClick = { showBackgroundHelp = true }
+                    )
+                }
+            }
+        }
+
+        item { SectionLabel("习惯提醒") }
+
+        item {
+            PotatoCard(Modifier.fillMaxWidth()) {
+                Column {
+                    HabitSlotSettingRow(
+                        label = "早上",
+                        time = formatMinutes(habitMorningMin),
+                        enabled = habitMorningEnabled,
+                        onTimeClick = {
+                            pickHabitTime(HabitReminderSlot.MORNING, habitMorningMin) {
+                                habitMorningMin = it
+                            }
+                        },
+                        onToggle = {
+                            toggleHabitSlot(HabitReminderSlot.MORNING, it) { value ->
+                                habitMorningEnabled = value
+                            }
+                        }
+                    )
+                    DividerLine()
+                    HabitSlotSettingRow(
+                        label = "下午",
+                        time = formatMinutes(habitAfternoonMin),
+                        enabled = habitAfternoonEnabled,
+                        onTimeClick = {
+                            pickHabitTime(HabitReminderSlot.AFTERNOON, habitAfternoonMin) {
+                                habitAfternoonMin = it
+                            }
+                        },
+                        onToggle = {
+                            toggleHabitSlot(HabitReminderSlot.AFTERNOON, it) { value ->
+                                habitAfternoonEnabled = value
+                            }
+                        }
+                    )
+                    DividerLine()
+                    HabitSlotSettingRow(
+                        label = "晚上",
+                        time = formatMinutes(habitEveningMin),
+                        enabled = habitEveningEnabled,
+                        onTimeClick = {
+                            pickHabitTime(HabitReminderSlot.EVENING, habitEveningMin) {
+                                habitEveningMin = it
+                            }
+                        },
+                        onToggle = {
+                            toggleHabitSlot(HabitReminderSlot.EVENING, it) { value ->
+                                habitEveningEnabled = value
+                            }
+                        }
+                    )
+                }
+            }
+        }
+
+        item {
+            Text(
+                "每个时段每天最多提醒一次，只列出仍未完成的习惯。",
+                style = MaterialTheme.typography.labelMedium,
+                color = palette.muted,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+        }
+
+        item { SectionLabel("专注体验") }
+
+        item {
+            PotatoCard(Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("专注时保持屏幕常亮", style = MaterialTheme.typography.titleMedium, color = palette.ink)
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            "适合把手机放在桌上看着倒计时",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = palette.muted
+                        )
+                    }
+                    Switch(
+                        checked = keepScreenOn,
+                        onCheckedChange = {
+                            keepScreenOn = it
+                            settings.keepScreenOn = it
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = palette.focus,
+                            uncheckedThumbColor = palette.muted,
+                            uncheckedTrackColor = palette.line
+                        )
+                    )
+                }
+            }
+        }
+
+        item { SectionLabel("数据") }
+
+        item {
+            PotatoCard(Modifier.fillMaxWidth()) {
+                Column {
+                    SettingRow(
+                        title = "导出数据",
+                        subtitle = "JSON 备份，可以自己保存或分析",
+                        trailing = "导出",
+                        onClick = {
+                            val intent = DataExport.createShareIntent(
+                                context,
+                                app.sessions.allSessions(),
+                                app.tasks.allTasks(),
+                                app.presets.all(),
+                                app.habits.allHabits(),
+                                app.habitLogs.allLogs()
+                            )
+                            runCatching { context.startActivity(intent) }
+                        }
+                    )
+                    DividerLine()
+                    SettingRow(
+                        title = "清空记录",
+                        subtitle = "专注、正计时与习惯打卡记录",
+                        trailing = "清空",
+                        danger = true,
+                        onClick = { showClearDialog = true }
+                    )
+                }
+            }
+        }
+
+        item {
+            PotatoCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Rounded.Info,
+                            contentDescription = null,
+                            tint = palette.muted,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("关于 Potato", style = MaterialTheme.typography.titleMedium, color = palette.ink)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Potato 1.0 · 本地优先，无需账号。\n专注记录只保存在这台设备上，随时可以导出。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = palette.muted
+                    )
+                }
+            }
+        }
+
+        item { Spacer(Modifier.height(24.dp)) }
+    }
+
+    editingPreset?.let { preset ->
+        PresetEditorDialog(
+            initial = preset,
+            canDelete = presets.size > 1 && preset.id > 0L,
+            onDismiss = { editingPreset = null },
+            onSave = { updated ->
+                if (updated.id == 0L) {
+                    val newId = app.presets.insert(updated.copy(sortOrder = presets.size))
+                    if (presets.isEmpty()) app.presets.setDefault(newId)
+                    if (presets.isEmpty()) settings.selectedPresetId = newId
+                } else {
+                    app.presets.update(updated)
+                    if (updated.isDefault) app.presets.setDefault(updated.id)
+                }
+                editingPreset = null
+                reloadPresets()
+                onDataChanged()
+            },
+            onDelete = { target ->
+                app.presets.delete(target.id)
+                val remaining = app.presets.all()
+                if (target.isDefault && remaining.isNotEmpty()) {
+                    app.presets.setDefault(remaining.first().id)
+                    settings.selectedPresetId = remaining.first().id
+                }
+                if (settings.selectedPresetId == target.id) {
+                    settings.selectedPresetId = remaining.firstOrNull()?.id ?: -1L
+                }
+                editingPreset = null
+                reloadPresets()
+                onDataChanged()
+            }
+        )
+    }
+
+    if (showClearDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearDialog = false },
+            containerColor = palette.surface,
+            title = { Text("清空所有记录？") },
+            text = { Text("所有番茄、正计时、休息和习惯打卡记录都会被删除；任务、习惯和节奏保留。这个操作无法撤销。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    app.sessions.clearAll()
+                    app.habitLogs.clearAll()
+                    showClearDialog = false
+                    onDataChanged()
+                }) { Text("清空", color = palette.danger) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
+    if (showBackgroundHelp) {
+        AlertDialog(
+            onDismissRequest = { showBackgroundHelp = false },
+            containerColor = palette.surface,
+            title = { Text("保持后台计时") },
+            text = {
+                Text(
+                    "Potato 使用前台服务和精确闹钟保持计时。\n\n" +
+                        "如果手机在锁屏后停止计时或收不到提醒，请在系统设置中允许 Potato 自启动、关闭省电限制，并把电池策略设为「不限制」。\n\n" +
+                        "小米、华为、OPPO、vivo 等系统的名称可能不同，通常在「应用管理 → 电池 → 后台耗电管理」中。"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showBackgroundHelp = false
+                    openAppDetails()
+                }) { Text("打开应用设置") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBackgroundHelp = false }) { Text("知道了") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun SettingRow(
+    title: String,
+    subtitle: String,
+    trailing: String,
+    onClick: () -> Unit,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    danger: Boolean = false
+) {
+    val palette = Potato.palette
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (icon != null) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = palette.muted,
+                modifier = Modifier.size(19.dp)
+            )
+            Spacer(Modifier.width(10.dp))
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                color = if (danger) palette.danger else palette.ink
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.labelMedium,
+                color = palette.muted
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            trailing,
+            style = MaterialTheme.typography.labelLarge,
+            color = if (danger) palette.danger else palette.focus
+        )
+    }
+}
+
+@Composable
+private fun HabitSlotSettingRow(
+    label: String,
+    time: String,
+    enabled: Boolean,
+    onTimeClick: () -> Unit,
+    onToggle: (Boolean) -> Unit
+) {
+    val palette = Potato.palette
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.titleMedium, color = palette.ink)
+            Spacer(Modifier.height(3.dp))
+            Text(
+                "汇总该时段未完成的习惯",
+                style = MaterialTheme.typography.labelMedium,
+                color = palette.muted
+            )
+        }
+        TextButton(onClick = onTimeClick) {
+            Text(
+                time,
+                style = MaterialTheme.typography.titleMedium,
+                color = if (enabled) palette.focus else palette.muted
+            )
+        }
+        Switch(
+            checked = enabled,
+            onCheckedChange = onToggle,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = palette.focus,
+                uncheckedThumbColor = palette.muted,
+                uncheckedTrackColor = palette.line
+            )
+        )
+    }
+}
+
+private fun formatMinutes(minutesOfDay: Int): String =
+    String.format(Locale.US, "%02d:%02d", minutesOfDay / 60, minutesOfDay % 60)
+
+@Composable
+private fun DividerLine() {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 18.dp)
+            .height(1.dp)
+            .background(Potato.palette.line)
+    )
+}
+
+@Composable
+private fun StepperButton(text: String, onClick: () -> Unit) {
+    val palette = Potato.palette
+    Box(
+        modifier = Modifier
+            .size(30.dp)
+            .clip(CircleShape)
+            .background(palette.surfaceRaised)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text, style = MaterialTheme.typography.titleMedium, color = palette.ink)
+    }
+}
+
+@Composable
+private fun PresetEditorDialog(
+    initial: Preset,
+    canDelete: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (Preset) -> Unit,
+    onDelete: (Preset) -> Unit
+) {
+    val palette = Potato.palette
+    var name by remember(initial.id) { mutableStateOf(initial.name) }
+    var focus by remember(initial.id) { mutableIntStateOf(initial.focusMin) }
+    var shortBreak by remember(initial.id) { mutableIntStateOf(initial.shortBreakMin) }
+    var longBreak by remember(initial.id) { mutableIntStateOf(initial.longBreakMin) }
+    var every by remember(initial.id) { mutableIntStateOf(initial.longBreakEvery) }
+    var autoBreak by remember(initial.id) { mutableStateOf(initial.autoStartBreak) }
+    var autoFocus by remember(initial.id) { mutableStateOf(initial.autoStartFocus) }
+    var isDefault by remember(initial.id) { mutableStateOf(initial.isDefault) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = palette.surface,
+        title = { Text(if (initial.id == 0L) "新建节奏" else "编辑节奏") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 500.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("名称") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp)
+                )
+                Spacer(Modifier.height(12.dp))
+                NumberStepper("专注", focus, 1..180, "分钟") { focus = it }
+                NumberStepper("短休息", shortBreak, 1..60, "分钟") { shortBreak = it }
+                NumberStepper("长休息", longBreak, 5..120, "分钟") { longBreak = it }
+                NumberStepper("每几颗长休", every, 2..8, "颗") { every = it }
+                Spacer(Modifier.height(8.dp))
+                SwitchRow("自动开始休息", autoBreak) { autoBreak = it }
+                SwitchRow("自动开始下一颗", autoFocus) { autoFocus = it }
+                SwitchRow("设为默认节奏", isDefault) { isDefault = it }
+                if (canDelete) {
+                    Spacer(Modifier.height(4.dp))
+                    TextButton(onClick = { onDelete(initial) }) {
+                        Icon(Icons.Rounded.Delete, contentDescription = null, tint = palette.danger, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("删除这个节奏", color = palette.danger)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onSave(
+                        initial.copy(
+                            name = name.trim().ifBlank { "我的节奏" },
+                            focusMin = focus,
+                            shortBreakMin = shortBreak,
+                            longBreakMin = longBreak,
+                            longBreakEvery = every,
+                            autoStartBreak = autoBreak,
+                            autoStartFocus = autoFocus,
+                            isDefault = isDefault
+                        )
+                    )
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = palette.focus)
+            ) { Text("保存") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
+}
+
+@Composable
+private fun NumberStepper(
+    label: String,
+    value: Int,
+    range: IntRange,
+    unit: String,
+    onChange: (Int) -> Unit
+) {
+    val palette = Potato.palette
+    var text by remember(value) { mutableStateOf(value.toString()) }
+    LaunchedEffect(value) {
+        if (text.toIntOrNull() != value) text = value.toString()
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = palette.ink, modifier = Modifier.weight(1f))
+        StepperButton("−") { onChange((value - 1).coerceIn(range.first, range.last)) }
+        Row(
+            modifier = Modifier
+                .width(104.dp)
+                .padding(horizontal = 5.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .border(1.dp, palette.line, RoundedCornerShape(10.dp))
+                .padding(horizontal = 7.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            BasicTextField(
+                value = text,
+                onValueChange = { raw ->
+                    val digits = raw.filter { it.isDigit() }.take(3)
+                    text = digits
+                    digits.toIntOrNull()?.let { parsed ->
+                        val clamped = parsed.coerceIn(range.first, range.last)
+                        onChange(clamped)
+                        if (clamped != parsed) text = clamped.toString()
+                    }
+                },
+                modifier = Modifier.width(44.dp),
+                singleLine = true,
+                textStyle = MaterialTheme.typography.labelLarge.copy(
+                    color = palette.ink,
+                    textAlign = TextAlign.Center
+                ),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
+            Text(unit, style = MaterialTheme.typography.labelMedium, color = palette.muted)
+        }
+        StepperButton("+") { onChange((value + 1).coerceIn(range.first, range.last)) }
+    }
+}
+
+@Composable
+private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    val palette = Potato.palette
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = palette.ink, modifier = Modifier.weight(1f))
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = palette.focus,
+                uncheckedThumbColor = palette.muted,
+                uncheckedTrackColor = palette.line
+            )
+        )
+    }
+}

@@ -1,0 +1,21 @@
+# Android / Gradle
+.gradle/
+.idea/
+.kotlin/
+local.properties
+build/
+app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.iml
+*.log
+*.hprof
+
+# Local build outputs / backups
+dist/
+screenshot-*.png
+
+# OS
+.DS_Store
+Thumbs.db
