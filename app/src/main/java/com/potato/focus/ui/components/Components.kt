@@ -202,7 +202,7 @@ fun ModeSwitch(
         verticalAlignment = Alignment.CenterVertically
     ) {
         ModePill(
-            text = "番茄钟",
+            text = "土豆钟",
             selected = !stopwatch,
             enabled = enabled,
             onClick = { onModeChange(false) }

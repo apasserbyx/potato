@@ -99,6 +99,7 @@ import com.potato.focus.timer.TimerSnapshot
 import com.potato.focus.ui.components.PotatoCard
 import com.potato.focus.ui.components.SectionLabel
 import com.potato.focus.ui.theme.Potato
+import com.potato.focus.util.CustomSoundStorage
 import com.potato.focus.util.HabitIconStorage
 import com.potato.focus.util.TimeFormat
 import java.time.LocalDate
@@ -828,6 +829,47 @@ private fun HabitEditorSheet(
         imagePicker.launch("image/*")
     }
 
+    val audioPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val key = CustomSoundStorage.import(context, uri)
+                if (key != null) {
+                    soundKey = key
+                    error = ""
+                } else {
+                    error = "音频导入失败，请选择小于 5MB 的音频文件"
+                }
+            }
+        }
+    }
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        audioPicker.launch(arrayOf("audio/*"))
+    }
+
+    fun openAudioPicker() {
+        val permissions = when {
+            Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
+            Build.VERSION.SDK_INT <= 28 -> arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+            else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+        val missing = permissions.filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) {
+            audioPicker.launch(arrayOf("audio/*"))
+        } else {
+            audioPermissionLauncher.launch(missing.toTypedArray())
+        }
+    }
+
     fun openImagePicker() {
         val permissions = when {
             Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
@@ -1251,8 +1293,15 @@ private fun HabitEditorSheet(
         HabitSoundPickerDialog(
             currentKey = soundKey,
             allowFollowGlobal = true,
-            onDismiss = { showSoundPicker = false },
-            onSelect = { soundKey = it }
+            onDismiss = {
+                showSoundPicker = false
+                HabitSounds.stopPreview()
+            },
+            onSelect = { soundKey = it },
+            onImportAudio = {
+                showSoundPicker = false
+                openAudioPicker()
+            }
         )
     }
 }
@@ -1262,7 +1311,8 @@ internal fun HabitSoundPickerDialog(
     currentKey: String,
     allowFollowGlobal: Boolean,
     onDismiss: () -> Unit,
-    onSelect: (String) -> Unit
+    onSelect: (String) -> Unit,
+    onImportAudio: (() -> Unit)? = null
 ) {
     val palette = Potato.palette
     val context = LocalContext.current
@@ -1291,6 +1341,31 @@ internal fun HabitSoundPickerDialog(
                         selected = currentKey == option.key,
                         onSelect = { onSelect(option.key) },
                         onPreview = { HabitSounds.preview(context, option.key) }
+                    )
+                }
+                if (onImportAudio != null) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(palette.line)
+                    )
+                    TextButton(
+                        onClick = {
+                            HabitSounds.stopPreview()
+                            onImportAudio()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("导入本地音频", color = palette.focus)
+                    }
+                }
+                if (currentKey.startsWith("media:")) {
+                    SoundOptionRow(
+                        label = "自定义音频",
+                        selected = true,
+                        onSelect = { },
+                        onPreview = { HabitSounds.preview(context, currentKey) }
                     )
                 }
             }

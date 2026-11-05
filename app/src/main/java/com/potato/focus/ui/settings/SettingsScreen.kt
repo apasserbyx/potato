@@ -1016,7 +1016,7 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
             onDismissRequest = { showClearDialog = false },
             containerColor = palette.surface,
             title = { Text("清空所有记录？") },
-            text = { Text("所有番茄、正计时、休息和习惯打卡记录都会被删除；任务、习惯和节奏保留。这个操作无法撤销。") },
+            text = { Text("所有土豆、正计时、休息和习惯打卡记录都会被删除；任务、习惯和节奏保留。这个操作无法撤销。") },
             confirmButton = {
                 TextButton(onClick = {
                     app.sessions.clearAll()

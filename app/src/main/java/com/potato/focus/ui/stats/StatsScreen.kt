@@ -187,7 +187,7 @@ fun StatsScreen(refreshKey: Int) {
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
-                        Metric("番茄", "${summary.tomatoCount}", "颗")
+                        Metric("土豆", "${summary.tomatoCount}", "颗")
                         Metric("自由专注", "${summary.openCount}", "次")
                         Metric("完成率", "${(summary.completionRate * 100).toInt()}", "%")
                     }
@@ -308,7 +308,7 @@ fun StatsScreen(refreshKey: Int) {
             item {
                 PotatoCard(Modifier.fillMaxWidth()) {
                     EmptyHint(
-                        "这里还空着。完成第一颗番茄或一次正计时，记录会自动出现在这里。",
+                        "这里还空着。完成第一颗土豆或一次正计时，记录会自动出现在这里。",
                         Modifier.padding(horizontal = 16.dp)
                     )
                 }
