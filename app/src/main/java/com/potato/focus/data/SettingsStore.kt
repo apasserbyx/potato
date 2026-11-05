@@ -116,6 +116,22 @@ class SettingsStore(context: Context) {
         prefs.edit().putBoolean(key, enabled).apply()
     }
 
+    fun exportPreferences(): Map<String, Any?> = prefs.all
+
+    fun restorePreferences(values: Map<String, Any?>) {
+        val editor = prefs.edit().clear()
+        values.forEach { (key, value) ->
+            when (value) {
+                is Boolean -> editor.putBoolean(key, value)
+                is Int -> editor.putInt(key, value)
+                is Long -> editor.putLong(key, value)
+                is Float -> editor.putFloat(key, value)
+                is String -> editor.putString(key, value)
+            }
+        }
+        editor.apply()
+    }
+
     fun selectTask(task: TaskItem?) {
         prefs.edit()
             .putLong(KEY_TASK_ID, task?.id ?: -1L)

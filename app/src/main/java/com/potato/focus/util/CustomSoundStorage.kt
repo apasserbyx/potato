@@ -15,6 +15,59 @@ import java.io.File
 object CustomSoundStorage {
     private const val MAX_BYTES = 5 * 1024 * 1024L
 
+    suspend fun importBytes(
+        context: Context,
+        fileName: String,
+        mime: String,
+        bytes: ByteArray
+    ): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            if (!mime.startsWith("audio/")) return@runCatching null
+            if (bytes.size > MAX_BYTES) return@runCatching null
+            val safeName = fileName.substringAfterLast('/').ifBlank {
+                "Potato-${System.currentTimeMillis()}.mp3"
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Audio.Media.DISPLAY_NAME, safeName)
+                    put(MediaStore.Audio.Media.MIME_TYPE, mime)
+                    put(
+                        MediaStore.Audio.Media.RELATIVE_PATH,
+                        Environment.DIRECTORY_NOTIFICATIONS + "/Potato"
+                    )
+                    put(MediaStore.Audio.Media.IS_PENDING, 1)
+                }
+                val resolver = context.contentResolver
+                val collection = MediaStore.Audio.Media.getContentUri(
+                    MediaStore.VOLUME_EXTERNAL_PRIMARY
+                )
+                val itemUri = resolver.insert(collection, values) ?: return@runCatching null
+                resolver.openOutputStream(itemUri)?.use { it.write(bytes) }
+                    ?: return@runCatching null
+                values.clear()
+                values.put(MediaStore.Audio.Media.IS_PENDING, 0)
+                resolver.update(itemUri, values, null, null)
+                return@runCatching "media:$itemUri"
+            } else {
+                val dir = File(
+                    Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_NOTIFICATIONS
+                    ),
+                    "Potato"
+                ).apply { mkdirs() }
+                val file = File(dir, safeName)
+                file.writeBytes(bytes)
+                MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(file.absolutePath),
+                    arrayOf(mime),
+                    null
+                )
+                return@runCatching "media:${Uri.fromFile(file)}"
+            }
+        }.getOrNull()
+    }
+
     suspend fun import(context: Context, uri: Uri): String? = withContext(Dispatchers.IO) {
         runCatching {
             val resolver = context.contentResolver

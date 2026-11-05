@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -81,13 +82,16 @@ import com.potato.focus.data.Preset
 import com.potato.focus.habits.HabitNotificationChannels
 import com.potato.focus.habits.HabitReminderScheduler
 import com.potato.focus.habits.HabitSounds
+import com.potato.focus.timer.TimerStore
 import com.potato.focus.ui.components.PotatoCard
 import com.potato.focus.ui.components.SectionLabel
 import com.potato.focus.ui.components.TagPill
 import com.potato.focus.ui.habits.HabitSoundPickerDialog
 import com.potato.focus.ui.theme.Potato
+import com.potato.focus.util.BackupPreview
 import com.potato.focus.util.CustomSoundStorage
-import com.potato.focus.util.DataExport
+import com.potato.focus.util.DataBackup
+import com.potato.focus.util.TimeFormat
 import java.util.Locale
 import kotlinx.coroutines.launch
 
@@ -132,6 +136,9 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
     var showTimerFocusPicker by remember { mutableStateOf(false) }
     var showTimerBreakPicker by remember { mutableStateOf(false) }
     var audioTarget by remember { mutableStateOf(SoundTarget.HABIT) }
+    var backupMessage by remember { mutableStateOf("") }
+    var importPreview by remember { mutableStateOf<BackupPreview?>(null) }
+    var backupBusy by remember { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -199,6 +206,28 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
         audioPickerLauncher.launch(arrayOf("audio/*"))
+    }
+
+    val backupImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            if (TimerStore(context).read().isActive) {
+                backupMessage = "计时进行中，结束后再导入备份"
+            } else {
+                scope.launch {
+                    backupBusy = true
+                    backupMessage = ""
+                    val preview = DataBackup.inspect(context, uri)
+                    backupBusy = false
+                    if (preview == null) {
+                        backupMessage = "无法读取这个备份文件"
+                    } else {
+                        importPreview = preview
+                    }
+                }
+            }
+        }
     }
 
     fun reloadPresets() {
@@ -815,19 +844,43 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
             PotatoCard(Modifier.fillMaxWidth()) {
                 Column {
                     SettingRow(
-                        title = "导出数据",
-                        subtitle = "JSON 备份，可以自己保存或分析",
-                        trailing = "导出",
+                        title = "导出完整备份",
+                        subtitle = "包含记录、任务、习惯、设置、自定义图标与提示音",
+                        trailing = if (backupBusy) "处理中" else "导出",
                         onClick = {
-                            val intent = DataExport.createShareIntent(
-                                context,
-                                app.sessions.allSessions(),
-                                app.tasks.allTasks(),
-                                app.presets.all(),
-                                app.habits.allHabits(),
-                                app.habitLogs.allLogs()
-                            )
-                            runCatching { context.startActivity(intent) }
+                            if (backupBusy) return@SettingRow
+                            backupBusy = true
+                            backupMessage = ""
+                            scope.launch {
+                                val intent = DataBackup.export(context)
+                                backupBusy = false
+                                if (intent == null) {
+                                    backupMessage = "导出失败，请稍后重试"
+                                } else {
+                                    runCatching { context.startActivity(intent) }
+                                        .onFailure { backupMessage = "没有可用的分享应用" }
+                                }
+                            }
+                        }
+                    )
+                    DividerLine()
+                    SettingRow(
+                        title = "导入备份",
+                        subtitle = "从 Potato 备份文件恢复；会覆盖当前全部数据",
+                        trailing = if (backupBusy) "处理中" else "导入",
+                        onClick = {
+                            if (backupBusy) return@SettingRow
+                            backupMessage = ""
+                            runCatching {
+                                backupImportLauncher.launch(
+                                    arrayOf(
+                                        "application/zip",
+                                        "application/x-zip",
+                                        "application/x-zip-compressed",
+                                        "application/octet-stream"
+                                    )
+                                )
+                            }.onFailure { backupMessage = "无法打开文件选择器" }
                         }
                     )
                     DividerLine()
@@ -839,6 +892,17 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
                         onClick = { showClearDialog = true }
                     )
                 }
+            }
+        }
+
+        if (backupMessage.isNotBlank()) {
+            item {
+                Text(
+                    backupMessage,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = palette.muted,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
             }
         }
 
@@ -919,6 +983,52 @@ fun SettingsScreen(onDataChanged: () -> Unit) {
             },
             dismissButton = {
                 TextButton(onClick = { showClearDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
+    importPreview?.let { preview ->
+        AlertDialog(
+            onDismissRequest = { if (!backupBusy) importPreview = null },
+            containerColor = palette.surface,
+            title = { Text("导入这份备份？") },
+            text = {
+                Text(
+                    "备份时间：${TimeFormat.shortDate(preview.exportedAt)} " +
+                        TimeFormat.clockTime(preview.exportedAt) + "\n\n" +
+                        "专注记录 ${preview.sessions} 条\n" +
+                        "任务 ${preview.tasks} 个 · 节奏 ${preview.presets} 个\n" +
+                        "习惯 ${preview.habits} 个 · 打卡 ${preview.habitLogs} 条\n" +
+                        "自定义图标 ${preview.icons} 个 · 提示音 ${preview.sounds} 个\n\n" +
+                        "导入会覆盖当前所有数据和设置，且无法撤销。"
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !backupBusy,
+                    onClick = {
+                        backupBusy = true
+                        backupMessage = ""
+                        scope.launch {
+                            val restored = DataBackup.restore(context, preview)
+                            backupBusy = false
+                            importPreview = null
+                            if (restored) {
+                                Toast.makeText(context, "备份已恢复", Toast.LENGTH_SHORT).show()
+                                onDataChanged()
+                                (context as? Activity)?.recreate()
+                            } else {
+                                backupMessage = "恢复失败：备份文件不完整或当前正在计时"
+                            }
+                        }
+                    }
+                ) { Text(if (backupBusy) "恢复中…" else "覆盖并恢复", color = palette.danger) }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !backupBusy,
+                    onClick = { importPreview = null }
+                ) { Text("取消") }
             }
         )
     }
